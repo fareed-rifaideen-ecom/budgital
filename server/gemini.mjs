@@ -69,6 +69,15 @@ function validateHistory(history) {
     .filter((entry) => entry.text);
 }
 
+// Keeps whole turns only, guarantees a user-first conversation, and drops a duplicated question.
+function normalizeHistory(history, question) {
+  const cleaned = validateHistory(history);
+  const firstUser = cleaned.findIndex((entry) => entry.role === 'user');
+  const turns = firstUser === -1 ? [] : cleaned.slice(firstUser);
+  while (turns.length && turns[turns.length - 1].text === question) turns.pop();
+  return turns.slice(-MAX_HISTORY);
+}
+
 function insightPrompt(input) {
   return `Give a calm, concrete read of this budget period.
 
@@ -120,7 +129,7 @@ export async function handleGeminiRequest(req, res) {
     if (mode === 'chat') {
       const question = cleanText(payload?.question, 400);
       if (!question) throw new Error('Ask a question to continue.');
-      const history = validateHistory(payload?.history).slice(0, -1);
+      const history = normalizeHistory(payload?.history, question);
       const { ok, status, responseBody } = await callGemini({
         systemInstruction: { parts: [{ text: GUARDRAILS }] },
         contents: [

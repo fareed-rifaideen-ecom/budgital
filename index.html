@@ -12,8 +12,13 @@
             ? stored.theme
             : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
           document.documentElement.dataset.theme = theme;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', theme === 'dark' ? '#0d1714' : '#f5f6f1');
         } catch (error) {
-          document.documentElement.dataset.theme = 'light';
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
+          var fallbackMeta = document.querySelector('meta[name="theme-color"]');
+          if (fallbackMeta) fallbackMeta.setAttribute('content', prefersDark ? '#0d1714' : '#f5f6f1');
         }
       })();
     </script>

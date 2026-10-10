@@ -79,7 +79,9 @@ const fullDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day
 const currencyFormatter = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 
 const makeId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
+const pad2 = (value: number) => String(value).padStart(2, '0');
+const localISO = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const isoDate = (date = new Date()) => localISO(date);
 const monthKey = (date: string) => date.slice(0, 7);
 const currentMonth = isoDate().slice(0, 7);
 
@@ -174,13 +176,11 @@ function getMonthLabel(month: string) {
 }
 
 function shiftMonth(month: string, delta: number) {
-  const value = new Date(`${month}-01T12:00:00`);
-  value.setMonth(value.getMonth() + delta);
-  return value.toISOString().slice(0, 7);
+  const [year, value] = month.split('-').map(Number);
+  const shifted = new Date(year, value - 1 + delta, 1);
+  return `${shifted.getFullYear()}-${pad2(shifted.getMonth() + 1)}`;
 }
 
-const pad2 = (value: number) => String(value).padStart(2, '0');
-const localISO = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
 const monthLastDay = (month: string) => {
   const [year, value] = month.split('-').map(Number);
   return `${month}-${pad2(new Date(year, value, 0).getDate())}`;
@@ -192,7 +192,7 @@ const addDays = (iso: string, delta: number) => {
 };
 const daySpan = (start: string, end: string) => Math.max(Math.round((new Date(`${end}T12:00:00`).getTime() - new Date(`${start}T12:00:00`).getTime()) / 86400000) + 1, 1);
 
-function buildRange(preset: RangePreset, anchor: string, custom: { start: string; end: string }): DateRange {
+function buildRange(preset: RangePreset, anchor: string, custom: { start: string; end: string }, transactions: Transaction[]): DateRange {
   switch (preset) {
     case 'lastMonth': {
       const month = shiftMonth(anchor, -1);
@@ -204,8 +204,12 @@ function buildRange(preset: RangePreset, anchor: string, custom: { start: string
       return { preset, start: `${shiftMonth(anchor, -5)}-01`, end: monthLastDay(anchor) };
     case 'ytd':
       return { preset, start: `${anchor.slice(0, 4)}-01-01`, end: monthLastDay(anchor) };
-    case 'all':
-      return { preset, start: '1970-01-01', end: '2999-12-31' };
+    case 'all': {
+      if (!transactions.length) return { preset, start: `${anchor}-01`, end: monthLastDay(anchor) };
+      const earliest = transactions.reduce((min, item) => (item.date < min ? item.date : min), transactions[0].date);
+      const latest = transactions.reduce((max, item) => (item.date > max ? item.date : max), transactions[0].date);
+      return { preset, start: earliest, end: latest };
+    }
     case 'custom': {
       const start = custom.start <= custom.end ? custom.start : custom.end;
       const end = custom.start <= custom.end ? custom.end : custom.start;
@@ -216,15 +220,28 @@ function buildRange(preset: RangePreset, anchor: string, custom: { start: string
   }
 }
 
-function allTimeMonths(transactions: Transaction[], range: DateRange) {
-  if (!transactions.length) return 1;
-  const earliest = transactions.reduce((min, item) => (item.date < min ? item.date : min), transactions[0].date).slice(0, 7);
-  const end = range.end.slice(0, 7);
-  return Math.max((Number(end.slice(0, 4)) - Number(earliest.slice(0, 4))) * 12 + (Number(end.slice(5, 7)) - Number(earliest.slice(5, 7))) + 1, 1);
+// Monthly plans are prorated so a partial month compares only its share of the plan.
+function budgetFactor(range: DateRange) {
+  let total = 0;
+  let cursor = range.start.slice(0, 7);
+  const lastMonth = range.end.slice(0, 7);
+  for (let guard = 0; guard < 600; guard += 1) {
+    const monthStart = `${cursor}-01`;
+    const monthEnd = monthLastDay(cursor);
+    const from = range.start > monthStart ? range.start : monthStart;
+    const to = range.end < monthEnd ? range.end : monthEnd;
+    total += daySpan(from, to) / Number(monthEnd.slice(8, 10));
+    if (cursor === lastMonth) break;
+    cursor = shiftMonth(cursor, 1);
+  }
+  return Math.max(Math.round(total * 100) / 100, 0.01);
+}
+
+function formatMonthCount(value: number) {
+  return Math.abs(value - Math.round(value)) < 0.05 ? String(Math.round(value)) : value.toFixed(1);
 }
 
 function monthsCovered(range: DateRange) {
-  if (range.preset === 'all') return 12;
   const start = range.start.slice(0, 7);
   const end = range.end.slice(0, 7);
   const months = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + (Number(end.slice(5, 7)) - Number(start.slice(5, 7))) + 1;
@@ -264,7 +281,7 @@ export function App() {
   const [view, setView] = useState<View>(readViewFromHash);
   const [anchor, setAnchor] = useState(currentMonth);
   const [preset, setPreset] = useState<RangePreset>('thisMonth');
-  const [customRange, setCustomRange] = useState({ start: `${currentMonth}-01`, end: isoDate() });
+  const [customRange, setCustomRange] = useState(() => ({ start: `${currentMonth}-01`, end: localISO(new Date()) }));
   const [showRange, setShowRange] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
@@ -276,6 +293,7 @@ export function App() {
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiAsking, setAiAsking] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [aiFailedQuestion, setAiFailedQuestion] = useState('');
   const themeTransition = useRef(false);
 
   useEffect(() => {
@@ -293,7 +311,7 @@ export function App() {
     setView(next);
   }
 
-  const range = useMemo(() => buildRange(preset, anchor, customRange), [preset, anchor, customRange]);
+  const range = useMemo(() => buildRange(preset, anchor, customRange, data.transactions), [preset, anchor, customRange, data.transactions]);
 
   function applyTheme(next: Theme, origin?: { x: number; y: number }) {
     const root = document.documentElement;
@@ -353,10 +371,10 @@ export function App() {
   const totals: Totals = useMemo(() => {
     const income = rangeIncome.reduce((sum, transaction) => sum + transaction.amount, 0);
     const expenses = rangeExpenses.reduce((sum, transaction) => sum + transaction.amount, 0);
-    const budgetMonths = range.preset === 'all' ? allTimeMonths(data.transactions, range) : monthsCovered(range);
+    const budgetMonths = budgetFactor(range);
     const budget = data.budgets.reduce((sum, item) => sum + item.amount, 0) * budgetMonths;
     return { income, expenses, budget, left: income - expenses, budgetLeft: budget - expenses, budgetMonths };
-  }, [data.budgets, data.transactions, range, rangeExpenses, rangeIncome]);
+  }, [data.budgets, range, rangeExpenses, rangeIncome]);
 
   function mutate(next: BudgetlyData) {
     setData({ ...next, isDemo: false });
@@ -421,6 +439,7 @@ export function App() {
     setAiError('');
     setAiInsight(null);
     setAiMessages([]);
+    setAiFailedQuestion('');
     try {
       const payload = await requestAi({ mode: 'insight', snapshot: buildSnapshot() });
       setAiInsight(payload as unknown as AiInsight);
@@ -431,24 +450,37 @@ export function App() {
     }
   }
 
-  async function askAiFollowUp(question: string) {
+  async function sendFollowUp(question: string, appendUser: boolean) {
     const trimmed = question.trim().slice(0, 400);
     if (!trimmed || aiAsking) return;
-    const userMessage: AiMessage = { id: makeId(), role: 'user', text: trimmed };
-    const history = [...aiMessages, userMessage].slice(-8);
-    setAiMessages(history);
+    const thread: AiMessage[] = appendUser ? [...aiMessages, { id: makeId(), role: 'user', text: trimmed }] : aiMessages;
+    if (appendUser) setAiMessages(thread);
+    // Send completed turns only; the pending question travels separately.
+    const history = (thread[thread.length - 1]?.role === 'user' ? thread.slice(0, -1) : thread)
+      .slice(-8)
+      .map(({ role, text }) => ({ role, text }));
     setAiAsking(true);
     setAiError('');
+    setAiFailedQuestion('');
     try {
-      const payload = await requestAi({ mode: 'chat', question: trimmed, history: history.map(({ role, text }) => ({ role, text })), snapshot: buildSnapshot() });
+      const payload = await requestAi({ mode: 'chat', question: trimmed, history, snapshot: buildSnapshot() });
       const answer = typeof payload.answer === 'string' ? payload.answer : '';
       if (!answer) throw new Error('The AI service returned an empty answer.');
       setAiMessages((current) => [...current, { id: makeId(), role: 'assistant', text: answer }]);
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
+      setAiFailedQuestion(trimmed);
     } finally {
       setAiAsking(false);
     }
+  }
+
+  function askAiFollowUp(question: string) {
+    void sendFollowUp(question, true);
+  }
+
+  function retryAiFollowUp() {
+    if (aiFailedQuestion) void sendFollowUp(aiFailedQuestion, false);
   }
 
   function shiftAnchor(delta: number) {
@@ -520,7 +552,7 @@ export function App() {
       {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
       {showAdd && <TransactionModal data={data} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
-      {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onAsk={askAiFollowUp} />}
+      {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} />}
     </div>
   );
 }
@@ -541,7 +573,7 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
       <div>
         <div className="kicker"><Sparkles size={14} /> Your monthly pulse</div>
         <h1>Your money, in plain English.</h1>
-        <p>Showing <strong>{rangeLabel(range)}</strong>{totals.budgetMonths > 1 ? ` · ${totals.budgetMonths} monthly plans combined` : ''}. <button className="inline-link" onClick={onOpenRange}>Change dates</button></p>
+        <p>Showing <strong>{rangeLabel(range)}</strong>{totals.budgetMonths > 1.02 ? ` · ${formatMonthCount(totals.budgetMonths)} months of plans combined` : ''}. <button className="inline-link" onClick={onOpenRange}>Change dates</button></p>
       </div>
       <div className="intro-actions">{data.isDemo && <button className="ghost-button" onClick={onClear}><Trash2 size={15} /> Clear sample data</button>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgetly AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
     </section>
@@ -549,7 +581,7 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
     <section className="hero-grid">
       <div className="hero-card">
         <div className="hero-top"><div><span className="eyebrow light">Available after spending</span><div className="hero-number">{formatCurrency(totals.left)}</div><span className="hero-meta">{totals.left >= 0 ? 'You’re in a comfortable spot.' : 'A little more went out than came in.'}</span></div><div className="hero-orbit" style={{ '--progress': `${Math.min(Math.max(percentUsed, 0), 1) * 360}deg` } as CSSProperties}><div><strong>{Math.round(Math.min(percentUsed, 1) * 100)}%</strong><small>of budget used</small></div></div></div>
-        <div className="hero-bottom"><span>{formatCurrency(totals.expenses)} spent</span><span className="hero-separator">/</span><span>{formatCurrency(totals.budget)} {totals.budgetMonths > 1 ? `plan · ${totals.budgetMonths} mo` : 'budget'}</span><span className="hero-bar"><i style={{ width: `${Math.min(percentUsed * 100, 100)}%` }} /></span></div>
+        <div className="hero-bottom"><span>{formatCurrency(totals.expenses)} spent</span><span className="hero-separator">/</span><span>{formatCurrency(totals.budget)} {totals.budgetMonths > 1.02 ? `plan · ${formatMonthCount(totals.budgetMonths)} mo` : 'budget'}</span><span className="hero-bar"><i style={{ width: `${Math.min(percentUsed * 100, 100)}%` }} /></span></div>
       </div>
       <div className="stat-card income-card"><div className="stat-icon positive"><ArrowDownLeft size={18} /></div><div className="stat-label">Income <span>{rangeLabel(range)}</span></div><strong>{formatCurrency(totals.income)}</strong><small>{incomeChange === null ? comparison : <><span className={incomeChange >= 0 ? 'positive-text' : 'negative-text'}>{incomeChange >= 0 ? '+' : '−'}{Math.abs(incomeChange)}%</span> {comparison}</>}</small></div>
       <div className="stat-card expense-card"><div className="stat-icon warm"><ArrowUpRight size={18} /></div><div className="stat-label">Spent <span>{rangeLabel(range)}</span></div><strong>{formatCurrency(totals.expenses)}</strong><small>{expenseChange === null ? comparison : <><span className={expenseChange <= 0 ? 'positive-text' : 'negative-text'}>{expenseChange >= 0 ? '+' : '−'}{Math.abs(expenseChange)}%</span> {comparison}</>}</small></div>
@@ -571,7 +603,7 @@ function SpendingDonut({ data, categorySpend, total, onViewAll }: { data: Budget
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
-  return <div className="panel chart-panel donut-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Where it goes</div><h2>Spending by category</h2></div><button className="icon-button" aria-label="Open budgets" onClick={onViewAll}><MoreHorizontal size={19} /></button></div><div className="donut-content"><div className="donut-wrap"><svg viewBox="0 0 180 180" className="donut-chart"><circle cx="90" cy="90" r={radius} fill="none" stroke="#edf0e9" strokeWidth="18" />{categorySpend.map(({ category, amount }) => { const portion = total ? amount / total : 0; const dash = portion * circumference; const segment = <circle key={category.id} cx="90" cy="90" r={radius} fill="none" stroke={category.color} strokeWidth="18" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" transform="rotate(-90 90 90)" />; offset += dash; return segment; })}</svg><div className="donut-center"><strong>{formatCompactCurrency(total)}</strong><span>total spent</span></div></div><div className="legend">{categorySpend.length ? categorySpend.slice(0, 5).map(({ category, amount }) => <div className="legend-item" key={category.id}><span className="legend-swatch" style={{ background: category.color }} /><span>{category.name}</span><strong>{total ? Math.round(amount / total * 100) : 0}%</strong></div>) : <EmptyState title="No spending yet" copy="Your category mix will show up here." />}</div></div></div>;
+  return <div className="panel chart-panel donut-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Where it goes</div><h2>Spending by category</h2></div><button className="icon-button" aria-label="Open budgets" onClick={onViewAll}><MoreHorizontal size={19} /></button></div><div className="donut-content"><div className="donut-wrap"><svg viewBox="0 0 180 180" className="donut-chart"><circle cx="90" cy="90" r={radius} fill="none" className="donut-track" strokeWidth="18" />{categorySpend.map(({ category, amount }) => { const portion = total ? amount / total : 0; const dash = portion * circumference; const segment = <circle key={category.id} cx="90" cy="90" r={radius} fill="none" stroke={category.color} strokeWidth="18" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" transform="rotate(-90 90 90)" />; offset += dash; return segment; })}</svg><div className="donut-center"><strong>{formatCompactCurrency(total)}</strong><span>total spent</span></div></div><div className="legend">{categorySpend.length ? categorySpend.slice(0, 5).map(({ category, amount }) => <div className="legend-item" key={category.id}><span className="legend-swatch" style={{ background: category.color }} /><span>{category.name}</span><strong>{total ? Math.round(amount / total * 100) : 0}%</strong></div>) : <EmptyState title="No spending yet" copy="Your category mix will show up here." />}</div></div></div>;
 }
 
 function TrendChart({ data, range }: { data: BudgetlyData; range: DateRange }) {
@@ -591,7 +623,7 @@ function buildInsights(data: BudgetlyData, range: DateRange, totals: Totals, cat
   if (over) {
     const budget = budgetMap.get(over.category.id) ?? 0;
     const percent = Math.round((over.amount / budget - 1) * 100);
-    insights.push({ title: `${over.category.name} is ${percent}% over budget`, copy: `You’ve spent ${formatCurrency(over.amount)} against a ${formatCurrency(budget)} plan${months > 1 ? ` for ${months} months` : ''}.`, tone: 'warning', icon: '!' });
+    insights.push({ title: `${over.category.name} is ${percent}% over budget`, copy: `You’ve spent ${formatCurrency(over.amount)} against a ${formatCurrency(budget)} plan${months > 1.02 ? ` across ${formatMonthCount(months)} months` : ''}.`, tone: 'warning', icon: '!' });
   }
   const before = previousRange(range);
   const previousExpenses = before ? data.transactions.filter((transaction) => transaction.type === 'expense' && inRange(transaction.date, before)).reduce((sum, transaction) => sum + transaction.amount, 0) : 0;
@@ -779,7 +811,7 @@ function DateRangeSheet({ range, preset, anchor, custom, onSelect, onCustom, onS
         <label><span>From</span><input type="date" value={custom.start} max={custom.end} onChange={(event) => event.target.value && onCustom({ start: event.target.value, end: custom.end })} /></label>
         <label><span>To</span><input type="date" value={custom.end} min={custom.start} onChange={(event) => event.target.value && onCustom({ start: custom.start, end: event.target.value })} /></label>
       </div>
-      <p className="range-summary">{preset === 'custom' ? <><strong>Custom range applied.</strong> </> : null}Budget plans are stored per month, so a multi-month range compares each monthly plan against the spending inside the selected dates.</p>
+      <p className="range-summary">{preset === 'custom' ? <><strong>Custom range applied.</strong> </> : null}Budget plans are monthly. A range that covers part of a month compares only that share of the plan against the spending inside the selected dates.</p>
     </div>
   </div>;
 }
@@ -798,7 +830,7 @@ function TabBar({ view, onNavigate, onAdd }: { view: View; onNavigate: (view: Vi
   </nav>;
 }
 
-function AiConversation({ loading, insight, messages, asking, error, range, onClose, onRetry, onAsk }: { loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; onClose: () => void; onRetry: () => void; onAsk: (question: string) => void }) {
+function AiConversation({ loading, insight, messages, asking, error, range, failedQuestion, onClose, onRetry, onRetryFollowUp, onAsk }: { loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; failedQuestion: string; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
   const [draft, setDraft] = useState('');
   const suggestions = ['Why is my biggest category so high?', 'Which category grew fastest?', 'How can I free up $200 next month?'];
   const submit = (question: string) => {
@@ -822,7 +854,7 @@ function AiConversation({ loading, insight, messages, asking, error, range, onCl
           {messages.map((message) => <div key={message.id} className={`ai-bubble ${message.role === 'user' ? 'user' : 'bot'}`}>{message.text}</div>)}
           {asking && <div className="ai-typing"><i /><i /><i /></div>}
         </div>}
-        {error && <div className="ai-error"><strong>AI is unavailable right now</strong><p>{error}</p><button className="secondary-button" onClick={onRetry}>Try again</button></div>}
+        {error && <div className="ai-error"><strong>AI is unavailable right now</strong><p>{error}</p><div className="ai-error-actions">{failedQuestion && <button className="secondary-button" onClick={onRetryFollowUp}>Retry that question</button>}<button className="secondary-button" onClick={onRetry}>Refresh read</button></div></div>}
         {insight && <div className="ai-suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => submit(suggestion)}>{suggestion}</button>)}</div>}
         <div className="ai-composer">
           <input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(draft); }} placeholder="Ask a follow-up question…" aria-label="Ask a follow-up question" />
