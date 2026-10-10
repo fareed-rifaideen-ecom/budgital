@@ -21,7 +21,7 @@ Budgital stays a focused, browser-local budget app rather than becoming a bank-a
 
 ## Implementation
 
-- Persist the selected theme (`system`, `light`, or `dark`) alongside browser-local app data.
+- Persist the selected theme (`light` or `dark`) alongside browser-local app data.
 - Keep deterministic local insights as the baseline. Add an optional `/api/gemini/insights` server proxy that validates and caps an aggregate-only payload, reads `GEMINI_API_KEY` from the managed secret store, and returns a small structured JSON result. No client-side key and no raw transaction descriptions are sent.
 - Add a production Node server for the Gemini route plus static output serving; keep a Vite middleware for Preview.
 - Add crawlable home copy, `robots.txt`, `sitemap.xml`, public guide pages for monthly budgeting, bank-free budgeting, method comparison, and private AI budgeting, plus JSON-LD and internal links.
@@ -41,9 +41,11 @@ Budgital stays a focused, browser-local budget app rather than becoming a bank-a
 ## Iteration 2 — theme, AI conversation, dates, and mobile
 
 ### Scope
+
 Address the reported theme, contrast, AI, date-filtering, and mobile/tablet problems without changing the local-first data model, the CSV contract, or the privacy boundary of the AI proxy.
 
 ### Implementation
+
 - **Theme system.** Replace the three-way theme with two states (`light`, `dark`). `loadTheme` falls back to `window.matchMedia('(prefers-color-scheme: dark)')` when nothing is stored, a small inline script in `index.html` applies `data-theme` before first paint, and the React effect persists the choice and updates `theme-color`. `applyTheme` animates the switch with `document.startViewTransition` and a clip-path circle expanding from the switch position, with a short cross-fade fallback and a `prefers-reduced-motion` opt-out.
 - **Design tokens.** Every light-mode color in `styles.css` was replaced with semantic variables (surfaces, lines, text tiers, accent, hero, solid/on-solid, state colors). The dark palette is defined once on `html[data-theme='dark']`, so components inherit rather than needing per-element overrides. `--solid`/`--on-solid` keep primary buttons readable in both themes, and `--hero-bg`/`--hero-ink` keep the dark hero card dark in dark mode.
 - **AI conversation.** The proxy accepts `mode: 'insight'` for the first read and `mode: 'chat'` for follow-ups, with the same aggregate snapshot plus up to 8 cleaned history turns; replies are plain text. The client keeps an `AiMessage` thread, offers suggested questions, shows a typing indicator, and posts only totals, category totals, and local insight headlines.
@@ -51,27 +53,42 @@ Address the reported theme, contrast, AI, date-filtering, and mobile/tablet prob
 - **Mobile and tablet.** A bottom tab bar with a center add action replaces the drawer below 900px; tables become card rows on phones; modals and the range picker become bottom sheets; filter fields stack; tablets get a two-column dashboard and a collapsed topbar. Views sync to `location.hash` so the browser back button works.
 
 ### Project structure (unchanged plus additions)
+
 - `src/App.tsx` — data model, range math, insight rules, views, and the new theme switch, date sheet, conversation panel, and tab bar.
 - `src/styles.css` — tokenized base styles plus the theme, animation, AI, range, and responsive layers.
 - `server/gemini.mjs` — aggregate-only validation, guardrails, and the insight/chat modes.
 - `index.html` — crawlable copy, metadata, WebApplication and FAQ structured data, and the pre-paint theme script.
 
-
 ## Iteration 3 — Budgital brand, Apple-like public surface, currencies, and performance
+
 ### Product direction
+
 - Rebrand visible product copy from Budgetly to **Budgital** while preserving existing `budgetly-*` local-storage keys so current users do not lose data.
 - Keep `/app` dedicated to the private workspace. Use `/` as a separate, crawlable landing page for Budgital and Lumina Metrics by FMR.
 - Position the author as **Lumina Metrics by FMR**, created by **Fareed M. Rifaideen**, with website, GitHub, LinkedIn, and Buy Me a Coffee links.
+
 ### Design direction
+
 - **Movement:** Apple-like calm glassmorphism: generous whitespace, translucent panels, soft atmospheric gradients, rounded geometry, and restrained depth.
 - **Principles:** clarity before decoration; one obvious action per surface; motion should explain state; the data boundary stays visible.
 - **Palette:** preserve the deep forest ink, Budgital lime, peach attention, sky blue, and lavender category palette. Use lime as the signature brand color and forest as the high-contrast anchor.
 - **Landing layout:** editorial hero with a CSS-built product window, short trust strip, three differentiation cards, privacy orbit, author block, and FAQ. No heavy raster dependency was added; the art is CSS/SVG-like DOM so it loads quickly and remains sharp.
 - **Animation:** floating glass preview, rotating privacy orbit, animated startup orbit, hover lift, and reduced-motion fallback. App startup shows a branded splash with author credit.
+
 ### Implementation
+
 - Lazy-load `App` and `LandingPage` from `src/main.tsx`; the landing route does not load the full dashboard component before the user chooses `/app`.
 - `src/LandingPage.tsx` owns public copy, FAQ, author links, JSON-LD, theme switch, and app CTA.
 - The app writes private-route metadata (`noindex,nofollow`) while the landing page remains indexable.
-- AI usage is capped at 12 browser-tracked requests per local day and 12 server-side requests per client/day. The UI shows remaining requests, and the proxy returns a readable 429.
+- AI usage is capped at 12 browser-tracked requests per local day, a 12-request server-side best-effort client cap, and a configurable project-wide ceiling. The UI shows remaining requests, and the proxy returns a readable 429.
 - Transactions can carry a currency and stored conversion rate. The base currency is persisted locally; Gemini's validated `fx` mode can refresh cautious estimates for non-base currencies. Conversion is explicitly described as an estimate to verify.
 - Production static assets receive immutable one-year caching while HTML remains revalidated.
+
+## Review hardening — correctness and safety
+
+- Static server resolves nested `index.html` files for trailing-slash learning routes, and `/app` receives an HTTP `X-Robots-Tag: noindex, nofollow` header.
+- Budgital CSV backups use a quoted parser and explicit `transaction`, `category`, and `budget` records so a backup can restore the full local workspace, including currency and FX metadata.
+- Mixed-currency totals, trends, comparisons, sorting, budget progress, and transaction summaries use base-currency conversion. Missing FX rates are excluded from base totals and surfaced in Data instead of silently assuming 1:1.
+- Changing the base currency now requests Gemini estimates, converts budgets and legacy/base transactions, and preserves foreign transactions with new base rates. User-entered FX rates are retained.
+- Browser AI usage is refundable when a request fails; the server ignores spoofable forwarding headers and adds a configurable project-wide daily ceiling (`GEMINI_DAILY_PROJECT_LIMIT`, default 120) in addition to the local 12-request UX limit.
+- Desktop and compact transaction renderers are mutually exclusive in the DOM, native controls follow the active color scheme, and the landing header reflows at very narrow phone widths.

@@ -24,11 +24,15 @@ function serve(res, filePath) {
 const server = http.createServer((req, res) => {
   if (req.url?.startsWith('/api/gemini/insights')) return handleGeminiRequest(req, res);
   const requested = decodeURIComponent((req.url || '/').split('?')[0]);
+  if (requested === '/app' || requested.startsWith('/app/')) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
   const safePath = path.normalize(requested).replace(/^([.][.][/\\])+/, '');
   let filePath = path.join(dist, safePath === '/' ? 'index.html' : safePath);
   if (!serve(res, filePath)) {
-    filePath = path.join(dist, 'index.html');
-    if (!serve(res, filePath)) { res.statusCode = 404; res.end('Not found'); }
+    const nestedIndex = path.join(dist, safePath.replace(/[\/]$/, ''), 'index.html');
+    if (!serve(res, nestedIndex)) {
+      filePath = path.join(dist, 'index.html');
+      if (!serve(res, filePath)) { res.statusCode = 404; res.end('Not found'); }
+    }
   }
 });
 

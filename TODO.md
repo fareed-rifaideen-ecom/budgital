@@ -22,13 +22,22 @@
 - **Discoverability additions** — Publish FAQ structured data for the money questions answer engines ask, keep exactly one h1 per document, and keep the sitemap current.
 
 ## Iteration 3 — Budgital brand, landing, currencies, and performance
+
 - **Rebrand without data loss** — The visible product name is Budgital; the app page is reachable at `/app`; existing `budgetly-*` local-storage keys remain compatible so existing browser data is preserved.
 - **Dedicated SEO/AEO/GEO landing page** — `/` is a separate public landing page with answer-first copy, Budgital positioning, FAQ structured data, internal links, author details, dark/light theme, smooth scroll-friendly anchors, Apple-like glass effects, and a clear link to `/app`; `/app` remains dedicated to app functions and is marked noindex after app hydration.
 - **Apple-like visual language** — Use the existing forest/lime/peach/blue palette with appropriate gradients, translucent glass panels, rounded surfaces, depth, soft hover motion, and reduced-motion fallbacks across the public surface and branded loading state.
 - **Branded splash and author** — Before the app workspace appears, show the Budgital logo/wordmark, “Lumina Metrics by FMR,” and “Created by Fareed M. Rifaideen.” Keep author/support access available in the app sidebar and landing page.
 - **Author links and support** — Show Fareed M. Rifaideen’s website, GitHub, LinkedIn, and Buy Me a Coffee links; use a visible coffee mark/icon for the Buy Me a Coffee action.
 - **Safer sample-data affordance** — Remove “Clear sample data” from the main dashboard action row; expose starter-data clearing under Data / Import & export instead.
-- **AI chatbot and daily limit** — Keep follow-up questions in a conversation; show the remaining daily AI allowance; enforce a 12-request browser-local limit and a 12-request server-side per-client daily cap; preserve aggregate-only snapshots and readable error states.
+- **AI chatbot and daily limit** — Keep follow-up questions in a conversation; show the remaining daily AI allowance; enforce a 12-request browser-local limit, a 12-request server-side per-client best-effort cap, and a configurable 120-request project-wide ceiling; preserve aggregate-only snapshots and readable error states.
 - **Multi-currency tracking** — Allow USD, EUR, GBP, LKR, INR, AUD, CAD, and JPY per transaction; persist a base currency; convert foreign entries into base totals using a stored rate; offer a Gemini-powered rate refresh action with a clear “estimate—verify” caveat.
 - **Faster first load** — Lazy-load landing/app routes, keep the landing hero CSS-built rather than adding a large raster asset, and cache hashed production assets immutably while revalidating HTML.
 - **SEO documents remain valid** — Keep `manus-routes.json`, `robots.txt`, `sitemap.xml`, route metadata, public guides, and visible author/FAQ content synchronized with the Budgital routes.
+
+## Review hardening outcomes
+
+- **Preserve a full local backup:** CSV export/import must round-trip quoted descriptions, transactions, categories, budgets, currencies, and FX rates; imported records must merge without duplicating IDs.
+- **Keep multi-currency totals trustworthy:** mixed-currency comparisons, trends, sorting, summaries, budgets, and transaction views must use the active base currency; missing FX rates must not be treated as 1:1 and must be surfaced to the user.
+- **Harden AI usage:** failed AI requests must release the browser allowance; the server must ignore spoofable forwarding headers and enforce a configurable project-wide daily ceiling.
+- **Serve discoverable guide pages correctly:** trailing-slash learning URLs must return their static guide HTML, while `/app` must be noindex at the HTTP layer.
+- **Improve responsive/performance behavior:** do not mount both transaction representations at once; native controls must follow dark mode; the landing header must remain usable at narrow phone widths.

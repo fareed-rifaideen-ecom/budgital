@@ -81,7 +81,7 @@ type BudgitalData = {
   baseCurrency?: CurrencyCode;
 };
 
-type ImportRow = Transaction & { valid: boolean; error?: string };
+type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 'transaction' | 'category' | 'budget'; importCategory?: Category; importBudget?: Budget };
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
@@ -100,6 +100,11 @@ function consumeAiUse() {
   if (count >= AI_DAILY_LIMIT) return false;
   localStorage.setItem(AI_USAGE_KEY, JSON.stringify({ day, count: count + 1 }));
   return true;
+}
+function releaseAiUse() {
+  const day = localISO(new Date());
+  const count = usageToday();
+  localStorage.setItem(AI_USAGE_KEY, JSON.stringify({ day, count: Math.max(0, count - 1) }));
 }
 
 const colors = ['#c8ee68', '#ffb59d', '#8cc4ff', '#caa7f8', '#f3cc69', '#75d2c1', '#f28c9a', '#9aa9a4'];
@@ -188,12 +193,20 @@ function formatCurrency(value: number, currency?: CurrencyCode) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: active, maximumFractionDigits: active === 'JPY' ? 0 : 0 }).format(Math.abs(value));
 }
 function amountInBase(transaction: Transaction, baseCurrency: CurrencyCode = 'USD') {
-  return transaction.amount * (transaction.currency && transaction.currency !== baseCurrency ? (Number(transaction.fxRateToBase) || 1) : 1);
+  if (!transaction.currency || transaction.currency === baseCurrency) return transaction.amount;
+  const rate = Number(transaction.fxRateToBase);
+  return Number.isFinite(rate) && rate > 0 ? transaction.amount * rate : 0;
 }
+function hasKnownBaseAmount(transaction: Transaction, baseCurrency: CurrencyCode = 'USD') {
+  return !transaction.currency || transaction.currency === baseCurrency || (Number(transaction.fxRateToBase) > 0);
+}
+function payloadConfidence(payload: Record<string, unknown>) { return typeof payload.confidence === 'string' ? payload.confidence : 'low'; }
 
-function formatCompactCurrency(value: number) {
-  if (Math.abs(value) >= 1000) return `$${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
-  return formatCurrency(value);
+function formatCompactCurrency(value: number, currency?: CurrencyCode) {
+  let active = currency;
+  if (!active) { try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as { baseCurrency?: CurrencyCode }; active = stored.baseCurrency ?? 'USD'; } catch { active = 'USD'; } }
+  if (Math.abs(value) >= 1000) return `${currencySymbol(active)}${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
+  return formatCurrency(value, active);
 }
 
 const VIEW_IDS: View[] = ['overview', 'transactions', 'budgets', 'data'];
@@ -311,6 +324,12 @@ function rangeLabel(range: DateRange) {
 }
 
 const inRange = (date: string, range: DateRange) => date >= range.start && date <= range.end;
+
+function useMediaQuery(query: string) {
+  const [matches, setMatches] = useState(() => window.matchMedia?.(query).matches ?? false);
+  useEffect(() => { const media = window.matchMedia(query); const sync = () => setMatches(media.matches); sync(); media.addEventListener('change', sync); return () => media.removeEventListener('change', sync); }, [query]);
+  return matches;
+}
 
 export function App() {
   const [data, setData] = useState<BudgitalData>(loadData);
@@ -461,16 +480,55 @@ export function App() {
   }
 
   function handleImport(rows: ImportRow[]) {
-    const validRows = rows.filter((row) => row.valid).map(({ valid: _valid, error: _error, ...row }) => row);
-    if (!validRows.length) return;
-    mutate({ ...data, transactions: [...validRows, ...data.transactions] });
+    const valid = rows.filter((row) => row.valid);
+    if (!valid.length) return;
+    const importedCategories = valid.flatMap((row) => row.importCategory ? [row.importCategory] : []);
+    const categoriesById = new Map(data.categories.map((category) => [category.id, category]));
+    importedCategories.forEach((category) => categoriesById.set(category.id, category));
+    const importedBudgets = valid.flatMap((row) => row.importBudget ? [row.importBudget] : []);
+    const budgetsByCategory = new Map(data.budgets.map((budget) => [budget.categoryId, budget]));
+    importedBudgets.forEach((budget) => budgetsByCategory.set(budget.categoryId, budget));
+    const importedTransactions = valid.filter((row) => row.recordType !== 'category' && row.recordType !== 'budget').map(({ valid: _valid, error: _error, recordType: _recordType, importCategory: _category, importBudget: _budget, ...row }) => row);
+    const transactionsById = new Map(data.transactions.map((transaction) => [transaction.id, transaction]));
+    importedTransactions.forEach((transaction) => transactionsById.set(transaction.id, transaction));
+    mutate({ ...data, categories: Array.from(categoriesById.values()), budgets: Array.from(budgetsByCategory.values()), transactions: Array.from(transactionsById.values()) });
     setShowImport(false);
   }
 
   const [fxMessage, setFxMessage] = useState('');
-  function handleBaseCurrencyChange(baseCurrency: CurrencyCode) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, baseCurrency }));
-    mutate({ ...data, baseCurrency });
+  async function handleBaseCurrencyChange(baseCurrency: CurrencyCode) {
+    const oldBase = data.baseCurrency ?? 'USD';
+    if (baseCurrency === oldBase) return;
+    setFxMessage(`Converting your plans and transactions from ${oldBase} to ${baseCurrency}…`);
+    try {
+      const baseRatePayload = await requestAi({ mode: 'fx', from: oldBase, to: baseCurrency });
+      const oldBaseToNew = Number(baseRatePayload.rate);
+      if (!Number.isFinite(oldBaseToNew) || oldBaseToNew <= 0) throw new Error('Gemini returned an invalid base-currency rate.');
+      const foreignCurrencies = Array.from(new Set(data.transactions.map((transaction) => transaction.currency).filter((currency): currency is CurrencyCode => Boolean(currency && currency !== oldBase && currency !== baseCurrency))));
+      const foreignRates = new Map<CurrencyCode, number>();
+      const foreignConfidence = new Map<CurrencyCode, string>();
+      for (const from of foreignCurrencies) {
+        const payload = await requestAi({ mode: 'fx', from, to: baseCurrency });
+        const rate = Number(payload.rate);
+        if (!Number.isFinite(rate) || rate <= 0) throw new Error(`No usable ${from} → ${baseCurrency} rate was returned.`);
+        foreignRates.set(from, rate);
+        foreignConfidence.set(from, payloadConfidence(payload));
+      }
+      const transactions = data.transactions.map((transaction) => {
+        const native = transaction.currency ?? oldBase;
+        if (native === baseCurrency) return { ...transaction, currency: baseCurrency, fxRateToBase: 1, fxSource: 'same currency' };
+        if (native === oldBase) return { ...transaction, currency: baseCurrency, amount: transaction.amount * oldBaseToNew, fxRateToBase: 1, fxSource: `Gemini estimate · ${baseRatePayload.confidence || 'low'}` };
+        const rate = foreignRates.get(native);
+        return rate ? { ...transaction, fxRateToBase: rate, fxSource: `Gemini estimate · ${foreignConfidence.get(native) ?? 'low'}` } : transaction;
+      });
+      const budgets = data.budgets.map((budget) => ({ ...budget, amount: budget.amount * oldBaseToNew }));
+      const next = { ...data, baseCurrency, budgets, transactions };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      mutate(next);
+      setFxMessage(`Converted ${oldBase} → ${baseCurrency}. Gemini estimates are informational; verify before relying on them.`);
+    } catch (error) {
+      setFxMessage(error instanceof Error ? error.message : 'Currency conversion was not completed.');
+    }
   }
   async function refreshExchangeRates() {
     const baseCurrency = data.baseCurrency ?? 'USD';
@@ -501,14 +559,20 @@ export function App() {
   async function requestAi(body: Record<string, unknown>) {
     if (!consumeAiUse()) throw new Error(`Daily AI limit reached (${AI_DAILY_LIMIT} requests). Your limit resets tomorrow.`);
     setAiUsage(usageToday());
-    const response = await fetch('/api/gemini/insights', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const payload = await response.json() as Record<string, unknown> & { error?: string };
-    if (!response.ok) throw new Error(payload.error || 'The AI service could not respond.');
-    return payload;
+    try {
+      const response = await fetch('/api/gemini/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json() as Record<string, unknown> & { error?: string };
+      if (!response.ok) throw new Error(payload.error || 'The AI service could not respond.');
+      return payload;
+    } catch (error) {
+      releaseAiUse();
+      setAiUsage(usageToday());
+      throw error;
+    }
   }
 
   async function runAiInsights() {
@@ -641,7 +705,8 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
   const percentUsed = totals.budget ? Math.min(totals.expenses / totals.budget, 1.2) : 0;
   const recent = [...expenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
   const before = previousRange(range);
-  const sumType = (type: TransactionType, window: DateRange | null) => window ? data.transactions.filter((transaction) => transaction.type === type && inRange(transaction.date, window)).reduce((sum, transaction) => sum + transaction.amount, 0) : 0;
+  const baseCurrency = data.baseCurrency ?? 'USD';
+  const sumType = (type: TransactionType, window: DateRange | null) => window ? data.transactions.filter((transaction) => transaction.type === type && inRange(transaction.date, window)).reduce((sum, transaction) => sum + amountInBase(transaction, baseCurrency), 0) : 0;
   const change = (current: number, earlier: number) => earlier > 0 ? Math.round((current / earlier - 1) * 100) : null;
   const expenseChange = change(totals.expenses, sumType('expense', before));
   const incomeChange = change(totals.income, sumType('income', before));
@@ -673,7 +738,7 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
 
     <section className="lower-grid">
       <div className="panel insights-panel"><div className="panel-heading"><div><div className="panel-kicker"><Sparkles size={14} /> Smart read</div><h2>A few things worth knowing</h2></div><span className="insight-count">{insights.length} insights</span></div><div className="insight-list">{insights.map((insight) => <div className={`insight ${insight.tone}`} key={insight.title}><span className="insight-bullet">{insight.icon}</span><div><strong>{insight.title}</strong><p>{insight.copy}</p></div><ChevronRight size={16} /></div>)}</div></div>
-      <div className="panel recent-panel"><div className="panel-heading"><div><div className="panel-kicker"><Receipt size={14} /> Latest activity</div><h2>Recent transactions</h2></div><button className="text-button" onClick={() => onNavigate('transactions')}>View all <ChevronRight size={15} /></button></div><div className="transaction-list">{recent.length ? recent.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} category={getCategory(data.categories, transaction.categoryId)} />) : <EmptyState title="Nothing logged yet" copy="Add your first transaction to see it here." />}</div></div>
+      <div className="panel recent-panel"><div className="panel-heading"><div><div className="panel-kicker"><Receipt size={14} /> Latest activity</div><h2>Recent transactions</h2></div><button className="text-button" onClick={() => onNavigate('transactions')}>View all <ChevronRight size={15} /></button></div><div className="transaction-list">{recent.length ? recent.map((transaction) => <TransactionRow key={transaction.id} transaction={transaction} category={getCategory(data.categories, transaction.categoryId)} baseCurrency={data.baseCurrency ?? 'USD'} />) : <EmptyState title="Nothing logged yet" copy="Add your first transaction to see it here." />}</div></div>
     </section>
   </>;
 }
@@ -689,7 +754,8 @@ function TrendChart({ data, range }: { data: BudgitalData; range: DateRange }) {
   const monthCount = Math.min(Math.max(monthsCovered(range), 3), 12);
   const endMonth = range.end.slice(0, 7);
   const months = Array.from({ length: monthCount }, (_, index) => shiftMonth(endMonth, index - (monthCount - 1)));
-  const values = months.map((month) => data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + transaction.amount, 0));
+  const baseCurrency = data.baseCurrency ?? 'USD';
+  const values = months.map((month) => data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, baseCurrency), 0));
   const max = Math.max(...values, 1);
   return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> last {monthCount} months</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>$0</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === endMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
 }
@@ -705,7 +771,7 @@ function buildInsights(data: BudgitalData, range: DateRange, totals: Totals, cat
     insights.push({ title: `${over.category.name} is ${percent}% over budget`, copy: `You’ve spent ${formatCurrency(over.amount)} against a ${formatCurrency(budget)} plan${months > 1.02 ? ` across ${formatMonthCount(months)} months` : ''}.`, tone: 'warning', icon: '!' });
   }
   const before = previousRange(range);
-  const previousExpenses = before ? data.transactions.filter((transaction) => transaction.type === 'expense' && inRange(transaction.date, before)).reduce((sum, transaction) => sum + transaction.amount, 0) : 0;
+  const previousExpenses = before ? data.transactions.filter((transaction) => transaction.type === 'expense' && inRange(transaction.date, before)).reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0) : 0;
   if (before && previousExpenses > 0) {
     const delta = Math.round((totals.expenses / previousExpenses - 1) * 100);
     insights.push({ title: `Spending is ${Math.abs(delta)}% ${delta <= 0 ? 'lower' : 'higher'} than ${rangeLabel(before)}`, copy: `${formatCurrency(totals.expenses)} in ${rangeLabel(range)} vs ${formatCurrency(previousExpenses)} in the previous period.`, tone: delta <= 0 ? 'positive' : 'neutral', icon: delta <= 0 ? '↓' : '↑' });
@@ -717,8 +783,8 @@ function buildInsights(data: BudgitalData, range: DateRange, totals: Totals, cat
   return insights.slice(0, 3);
 }
 
-function TransactionRow({ transaction, category }: { transaction: Transaction; category: Category }) {
-  return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</strong></div>;
+function TransactionRow({ transaction, category, baseCurrency }: { transaction: Transaction; category: Category; baseCurrency: CurrencyCode }) {
+  return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount, transaction.currency)}{transaction.currency && transaction.fxRateToBase && transaction.fxRateToBase !== 1 ? <small className="native-currency-note">≈ {formatCurrency(amountInBase(transaction, baseCurrency), baseCurrency)}</small> : transaction.currency && !hasKnownBaseAmount(transaction) ? <small className="native-currency-note">rate needed</small> : null}</strong></div>;
 }
 
 function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange }: { data: BudgitalData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void }) {
@@ -726,15 +792,17 @@ function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd,
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
+  const isCompact = useMediaQuery('(max-width: 960px)');
   const categories = [...data.categories].sort((a, b) => a.name.localeCompare(b.name));
   const search = query.trim().toLowerCase();
   const filtered = data.transactions.filter((transaction) => inRange(transaction.date, range)
     && (filter === 'all' || transaction.type === filter)
     && (categoryId === 'all' || transaction.categoryId === categoryId)
     && (!search || `${transaction.description} ${getCategory(data.categories, transaction.categoryId).name} ${transaction.amount}`.toLowerCase().includes(search)));
-  const visible = [...filtered].sort((a, b) => sort === 'highest' ? b.amount - a.amount : sort === 'lowest' ? a.amount - b.amount : sort === 'oldest' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
-  const income = filtered.filter((transaction) => transaction.type === 'income').reduce((sum, transaction) => sum + transaction.amount, 0);
-  const expense = filtered.filter((transaction) => transaction.type === 'expense').reduce((sum, transaction) => sum + transaction.amount, 0);
+  const baseCurrency = data.baseCurrency ?? 'USD';
+  const visible = [...filtered].sort((a, b) => sort === 'highest' ? amountInBase(b, baseCurrency) - amountInBase(a, baseCurrency) : sort === 'lowest' ? amountInBase(a, baseCurrency) - amountInBase(b, baseCurrency) : sort === 'oldest' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+  const income = filtered.filter((transaction) => transaction.type === 'income').reduce((sum, transaction) => sum + amountInBase(transaction, baseCurrency), 0);
+  const expense = filtered.filter((transaction) => transaction.type === 'expense').reduce((sum, transaction) => sum + amountInBase(transaction, baseCurrency), 0);
   const isCustomRange = range.preset === 'custom' || range.preset === 'all';
   const from = range.preset === 'all' ? '' : range.start;
   const to = range.preset === 'all' ? '' : range.end;
@@ -763,20 +831,19 @@ function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd,
         <span>Net <strong className={income - expense < 0 ? 'negative-text' : 'positive-text'}>{formatCurrency(income - expense)}</strong></span>
         {(filter !== 'all' || categoryId !== 'all' || search || isCustomRange) && <button className="text-button" onClick={resetFilters}>Reset filters</button>}
       </div>
-      <div className="table-wrap"><table className="table-only"><thead><tr><th>Transaction</th><th>Category</th><th>Date</th><th className="align-right">Amount</th><th aria-label="Actions" /></tr></thead><tbody>{visible.map((transaction) => { const category = getCategory(data.categories, transaction.categoryId); return <tr key={transaction.id}><td><div className="table-transaction"><span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span><strong>{transaction.description || category.name}</strong></div></td><td><span className="category-pill" style={{ '--pill-color': category.color } as CSSProperties}>{category.name}</span></td><td>{fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</td><td className={`align-right amount-cell ${transaction.type === 'income' ? 'positive-text' : ''}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></td></tr>; })}</tbody></table></div>
-      <TransactionCards data={data} transactions={visible} onEdit={onEdit} onDelete={onDelete} />
+      <div className="table-wrap">{!isCompact && <table className="table-only"><thead><tr><th>Transaction</th><th>Category</th><th>Date</th><th className="align-right">Amount</th><th aria-label="Actions" /></tr></thead><tbody>{visible.map((transaction) => { const category = getCategory(data.categories, transaction.categoryId); return <tr key={transaction.id}><td><div className="table-transaction"><span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span><strong>{transaction.description || category.name}</strong></div></td><td><span className="category-pill" style={{ '--pill-color': category.color } as CSSProperties}>{category.name}</span></td><td>{fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</td><td className={`align-right amount-cell ${transaction.type === 'income' ? 'positive-text' : ''}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(amountInBase(transaction, baseCurrency), baseCurrency)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></td></tr>; })}</tbody></table>}{isCompact && <TransactionCards data={data} baseCurrency={baseCurrency} transactions={visible} onEdit={onEdit} onDelete={onDelete} />}</div>
       {!visible.length && <EmptyState title="No transactions match" copy="Try a wider date range or clear the filters." />}
     </div>
   </>;
 }
 
-function TransactionCards({ data, transactions, onEdit, onDelete }: { data: BudgitalData; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
+function TransactionCards({ data, baseCurrency, transactions, onEdit, onDelete }: { data: BudgitalData; baseCurrency: CurrencyCode; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
   return <div className="tx-cards">{transactions.map((transaction) => {
     const category = getCategory(data.categories, transaction.categoryId);
     return <div className="tx-card" key={transaction.id}>
       <span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span>
       <div className="tx-card-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div>
-      <div className="tx-card-side"><div className={`tx-card-amount ${transaction.type === 'income' ? 'positive-text' : 'expense-amount'}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</div><div className="tx-card-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></div>
+      <div className="tx-card-side"><div className={`tx-card-amount ${transaction.type === 'income' ? 'positive-text' : 'expense-amount'}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount, transaction.currency)}{transaction.currency && transaction.fxRateToBase && transaction.fxRateToBase !== 1 ? <small className="native-currency-note">≈ {formatCurrency(amountInBase(transaction, baseCurrency), baseCurrency)}</small> : transaction.currency && !hasKnownBaseAmount(transaction) ? <small className="native-currency-note">rate needed</small> : null}</div><div className="tx-card-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></div>
     </div>;
   })}</div>;
 }
@@ -788,13 +855,14 @@ function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { 
 }
 
 function DataView({ data, onImport, onExport, onClear, baseCurrency, onBaseCurrencyChange, onRefreshRates, fxMessage }: { data: BudgitalData; onImport: () => void; onExport: () => void; onClear: () => void; baseCurrency: CurrencyCode; onBaseCurrencyChange: (currency: CurrencyCode) => void; onRefreshRates: () => void; fxMessage: string }) {
+  const missingFx = data.transactions.filter((transaction) => transaction.currency && transaction.currency !== baseCurrency && !hasKnownBaseAmount(transaction, baseCurrency)).length;
   return <>
     <section className="page-intro compact"><div><div className="kicker"><FileUp size={14} /> Your data, your rules</div><h1>Import & export</h1><p>Everything stays local. Move a copy whenever you need one.</p></div><span className="local-badge"><span className="local-pulse" /> Local-only storage</span></section>
     <div className="data-grid">
-      <div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Expected columns: date, type, amount, category, description</div></div>
+      <div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Basic CSV: date, type, amount, category, description · Budgital backup CSVs also preserve categories, budgets, currency, and rates</div></div>
       <div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download your transactions, categories, and budgets as one CSV file you can keep or edit.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export</div></div>
     </div>
-    <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Multi-currency, one clear base</h2><p>Log entries in USD, EUR, GBP, LKR, INR, AUD, CAD, or JPY. Gemini can refresh cautious conversion estimates for your base currency.</p></div><label className="currency-setting"><span>Base currency</span><select value={baseCurrency} onChange={(event) => onBaseCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}</div>
+    <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Multi-currency, one clear base</h2><p>Log entries in USD, EUR, GBP, LKR, INR, AUD, CAD, or JPY. Gemini can refresh cautious conversion estimates for your base currency.</p></div><label className="currency-setting"><span>Base currency</span><select value={baseCurrency} onChange={(event) => onBaseCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}{missingFx > 0 && <div className="format-note warning-note"><ShieldCheckIcon /> {missingFx} foreign {missingFx === 1 ? 'entry needs' : 'entries need'} a verified rate and are excluded from base totals until one is available.</div>}</div>
     <div className="panel safety-panel"><div className="safety-icon"><Landmark size={19} /></div><div><h2>Private by default</h2><p>Budgital does not send your numbers anywhere. Clearing browser storage or using a different browser will create a separate budget.</p></div>{data.isDemo && <button className="text-button" onClick={onClear}><Trash2 size={15} /> Clear starter data</button>}<button className="text-button danger-text" onClick={onClear}><Trash2 size={15} /> Clear all data</button></div>
   </>;
 }
@@ -808,7 +876,7 @@ function TransactionModal({ data, baseCurrency, month, categories, transaction, 
   const [fxRate, setFxRate] = useState(String(transaction?.fxRateToBase ?? ''));
   const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
   useEffect(() => { if (!available.some((category) => category.id === categoryId)) setCategoryId(available[0]?.id ?? ''); }, [type]);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : Number(fxRate) > 0 ? 'manual rate' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
 }
 
 function ImportModal({ data, onClose, onImport }: { data: BudgitalData; onClose: () => void; onImport: (rows: ImportRow[]) => void }) {
@@ -820,33 +888,70 @@ function ImportModal({ data, onClose, onImport }: { data: BudgitalData; onClose:
     reader.onload = () => { const text = String(reader.result ?? ''); setFileName(file.name); setRows(parseCsv(text, data.categories)); };
     reader.readAsText(file);
   }
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal import-modal"><div className="modal-heading"><div><div className="panel-kicker"><Upload size={14} /> CSV importer</div><h2>Bring in your transactions</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{!rows.length ? <><button className="dropzone" onClick={() => inputRef.current?.click()}><FileUp size={26} /><strong>{fileName || 'Choose a CSV file'}</strong><span>or drop one here · max 10MB</span><input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) parseFile(file); }} /></button><div className="csv-helper"><strong>Use these columns:</strong> date, type, amount, category, description<div className="csv-example">2026-03-12, expense, 24.50, Dining, Lunch</div></div></> : <><div className="import-summary"><div><strong>{rows.filter((row) => row.valid).length} ready to import</strong><span>{rows.filter((row) => !row.valid).length} rows need attention</span></div><button className="text-button" onClick={() => setRows([])}>Choose another file</button></div><div className="import-table"><table><thead><tr><th>Row</th><th>Date</th><th>Type</th><th>Amount</th><th>Category</th><th>Status</th></tr></thead><tbody>{rows.slice(0, 8).map((row, index) => <tr key={`${row.id}-${index}`}><td>{index + 1}</td><td>{row.date || '—'}</td><td>{row.type || '—'}</td><td>{row.amount ? formatCurrency(row.amount) : '—'}</td><td>{row.categoryId ? getCategory(data.categories, row.categoryId).name : '—'}</td><td><span className={`status-pill ${row.valid ? 'valid' : 'invalid'}`}>{row.valid ? <><Check size={12} /> Ready</> : row.error}</span></td></tr>)}</tbody></table></div></>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!rows.length || !rows.some((row) => row.valid)} onClick={() => onImport(rows)}><Check size={16} /> Import valid rows</button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal import-modal"><div className="modal-heading"><div><div className="panel-kicker"><Upload size={14} /> CSV importer</div><h2>Bring in your transactions</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>{!rows.length ? <><button className="dropzone" onClick={() => inputRef.current?.click()}><FileUp size={26} /><strong>{fileName || 'Choose a CSV file'}</strong><span>or drop one here · max 10MB</span><input ref={inputRef} type="file" accept=".csv,text/csv" hidden onChange={(event) => { const file = event.target.files?.[0]; if (file) parseFile(file); }} /></button><div className="csv-helper"><strong>Use these columns:</strong> date, type, amount, category, description<div className="csv-example">2026-03-12, expense, 24.50, Dining, Lunch</div></div></> : <><div className="import-summary"><div><strong>{rows.filter((row) => row.valid).length} ready to import</strong><span>{rows.filter((row) => !row.valid).length} rows need attention</span></div><button className="text-button" onClick={() => setRows([])}>Choose another file</button></div><div className="import-table"><table><thead><tr><th>Row</th><th>Date</th><th>Type</th><th>Amount</th><th>Category</th><th>Status</th></tr></thead><tbody>{rows.slice(0, 8).map((row, index) => <tr key={`${row.id}-${index}`}><td>{index + 1}</td><td>{row.date || '—'}</td><td>{row.recordType === 'category' ? 'Category' : row.recordType === 'budget' ? 'Budget' : row.type || '—'}</td><td>{row.recordType === 'category' ? '—' : row.amount ? formatCurrency(row.amount) : '—'}</td><td>{row.recordType === 'category' ? row.description : row.categoryId ? getCategory(data.categories, row.categoryId).name : '—'}</td><td><span className={`status-pill ${row.valid ? 'valid' : 'invalid'}`}>{row.valid ? <><Check size={12} /> Ready</> : row.error}</span></td></tr>)}</tbody></table></div></>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!rows.length || !rows.some((row) => row.valid)} onClick={() => onImport(rows)}><Check size={16} /> Import valid records</button></div></div></div>;
+}
+
+function parseCsvRecords(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    if (character === '"') {
+      if (quoted && text[index + 1] === '"') { cell += '"'; index += 1; }
+      else quoted = !quoted;
+    } else if (character === ',' && !quoted) { row.push(cell); cell = ''; }
+    else if ((character === '\n' || character === '\r') && !quoted) {
+      if (character === '\r' && text[index + 1] === '\n') index += 1;
+      row.push(cell); cell = '';
+      if (row.some((value) => value.trim())) rows.push(row);
+      row = [];
+    } else cell += character;
+  }
+  if (cell.length || row.length) { row.push(cell); if (row.some((value) => value.trim())) rows.push(row); }
+  return rows;
 }
 
 function parseCsv(text: string, categories: Category[]): ImportRow[] {
-  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  if (!lines.length) return [];
-  const first = lines[0].toLowerCase().split(',').map((cell) => cell.trim());
-  const hasHeader = first.includes('date') || first.includes('amount');
-  const headers = hasHeader ? first : ['date', 'type', 'amount', 'category', 'description'];
-  const records = hasHeader ? lines.slice(1) : lines;
-  return records.map((line, index) => {
-    const cells = line.split(',').map((cell) => cell.trim().replace(/^"|"$/g, ''));
-    const values = Object.fromEntries(headers.map((header, headerIndex) => [header, cells[headerIndex] ?? '']));
-    const date = values.date;
+  const records = parseCsvRecords(text);
+  if (!records.length) return [];
+  const first = records[0].map((cell) => cell.trim().toLowerCase());
+  const hasHeader = first.includes('date') || first.includes('recordtype') || first.includes('amount');
+  const headers = hasHeader ? first : ['recordtype', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxratetobase'];
+  const rows = (hasHeader ? records.slice(1) : records).map((cells) => Object.fromEntries(headers.map((header, index) => [header, (cells[index] ?? '').trim()]))) as Record<string, string>[];
+  const metadataCategories = rows.filter((values) => (values.recordtype || 'transaction').toLowerCase() === 'category').map((values, index) => ({ id: values.categoryid || `import-category-${index}-${makeId()}`, name: values.category || 'Uncategorized', color: values.categorycolor || colors[index % colors.length], kind: values.categorykind === 'income' || values.categorykind === 'both' ? values.categorykind : 'expense' } as Category));
+  const knownCategories = [...categories, ...metadataCategories];
+  return rows.map((values, index) => {
+    const recordType = (values.recordtype || 'transaction').toLowerCase() as ImportRow['recordType'];
+    if (recordType === 'category') {
+      const category = metadataCategories.find((item) => item.id === values.categoryid) ?? metadataCategories[index] ?? { id: values.categoryid || `import-category-${index}-${makeId()}`, name: values.category || 'Uncategorized', color: values.categorycolor || colors[index % colors.length], kind: values.categorykind === 'income' || values.categorykind === 'both' ? values.categorykind : 'expense' } as Category;
+      return { id: category.id, type: 'expense', amount: 0, date: '', categoryId: category.id, description: category.name, recordType, importCategory: category, valid: true };
+    }
+    if (recordType === 'budget') {
+      const amount = Number(values.budgetamount || values.amount);
+      const categoryId = values.categoryid || knownCategories.find((category) => category.name.toLowerCase() === (values.category || '').toLowerCase())?.id || '';
+      const budget = { categoryId, amount };
+      return { id: `import-budget-${index}-${makeId()}`, type: 'expense', amount, date: '', categoryId, description: `Budget · ${values.category || categoryId}`, recordType, importBudget: budget, valid: Boolean(categoryId && amount > 0), error: !categoryId ? 'Category' : amount > 0 ? undefined : 'Budget amount' };
+    }
+    const date = values.date || '';
     const type = values.type?.toLowerCase() === 'income' ? 'income' : 'expense';
-    const amount = Number(String(values.amount).replace(/[$,]/g, ''));
+    const amount = Number(String(values.amount || '').replace(/[$,]/g, ''));
     const categoryName = values.category || 'Uncategorized';
-    const existing = categories.find((category) => category.name.toLowerCase() === categoryName.toLowerCase());
+    const existing = knownCategories.find((category) => category.name.toLowerCase() === categoryName.toLowerCase());
     const currency = currencyOptions.some((item) => item.code === values.currency?.toUpperCase()) ? values.currency.toUpperCase() as CurrencyCode : undefined;
     const fxRateToBase = Number(values.fxratetobase || values.fxrate || 0) || undefined;
     const error = !/^\d{4}-\d{2}-\d{2}$/.test(date) ? 'Date format' : !amount || amount <= 0 ? 'Amount' : !existing ? 'Category' : undefined;
-    return { id: `import-${index}-${makeId()}`, type: type as TransactionType, amount, date, categoryId: existing?.id ?? '', description: values.description || categoryName, currency, fxRateToBase, fxSource: fxRateToBase ? 'CSV rate' : undefined, valid: !error, error };
+    return { id: values.id || `import-${index}-${makeId()}`, type, amount, date, categoryId: existing?.id ?? '', description: values.description || categoryName, currency, fxRateToBase, fxSource: fxRateToBase ? 'CSV rate' : undefined, recordType: 'transaction', valid: !error, error };
   });
 }
 
 function exportCsv(data: BudgitalData) {
-  const rows = [['date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase'], ...data.transactions.map((transaction) => [transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : ''])];
+  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount'];
+  const rows: (string | number)[][] = [header];
+  data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '']));
+  data.categories.forEach((category) => rows.push(['category', category.id, '', '', '', category.name, '', '', '', category.id, category.color, category.kind, '']));
+  data.budgets.forEach((budget) => rows.push(['budget', `budget-${budget.categoryId}`, '', '', '', getCategory(data.categories, budget.categoryId).name, '', '', '', budget.categoryId, '', '', budget.amount.toFixed(2)]));
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

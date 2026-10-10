@@ -514,3 +514,9 @@ html[data-theme='dark'] { --accent: var(--lime); --accent-strong: var(--accent-t
 .currency-panel h2 { margin-bottom: 5px; }.currency-panel p { color: var(--t3); font-size: 10px; line-height: 1.5; }.currency-panel .format-note { grid-column: 2 / -1; }.currency-setting { display: grid; gap: 5px; color: var(--t3); font-size: 9px; font-weight: 800; }.currency-setting select { min-width: 150px; padding: 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--panel); color: var(--ink); font-size: 11px; }
 @media (max-width: 900px) { .currency-panel { grid-template-columns: auto 1fr; }.currency-panel .currency-setting, .currency-panel > button { grid-column: 2; justify-self: start; }.currency-panel .format-note { grid-column: 1 / -1; } }
 @media (max-width: 560px) { .currency-panel { grid-template-columns: 1fr; }.currency-panel .currency-setting, .currency-panel > button, .currency-panel .format-note { grid-column: 1; width: 100%; }.currency-panel > button { justify-self: stretch; } }
+
+html[data-theme='light'] { color-scheme: light; }
+html[data-theme='dark'] { color-scheme: dark; }
+.warning-note { color: var(--neg); background: var(--danger-soft); border-color: var(--warn-line); }
+.native-currency-note { display: block; color: var(--t3); font-size: 8px; font-weight: 600; }
+@media (max-width: 380px) { .landing-nav { gap: 8px; }.landing-brand { gap: 6px; }.landing-brand strong { font-size: 14px; }.landing-brand small { font-size: 9px; }.landing-actions { gap: 6px; }.landing-actions .landing-theme { display: none; }.landing-actions .button { min-height: 36px; padding-inline: 10px; font-size: 11px; } }
