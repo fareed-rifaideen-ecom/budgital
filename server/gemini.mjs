@@ -1,7 +1,9 @@
 const MAX_BODY_BYTES = 60_000;
 const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-lite-latest';
 const MAX_HISTORY = 8;
-const GUARDRAILS = `You are Budgetly's optional AI budgeting companion. You give calm, concrete, non-judgmental help about a personal budget. Never give financial, tax, legal, investment, credit, or debt advice, and never recommend products, lenders, or securities. Never invent numbers. Only use the aggregate snapshot and the conversation so far. Say plainly when the data is too sparse to answer well. Keep every reply under 120 words, in plain English, specific and practical.`;
+const DAILY_AI_LIMIT = 12;
+const dailyUsage = new Map();
+const GUARDRAILS = `You are Budgital's optional AI budgeting companion. You give calm, concrete, non-judgmental help about a personal budget. Never give financial, tax, legal, investment, credit, or debt advice, and never recommend products, lenders, or securities. Never invent numbers. Only use the aggregate snapshot and the conversation so far. Say plainly when the data is too sparse to answer well. Keep every reply under 120 words, in plain English, specific and practical.`;
 
 function sendJson(res, status, payload) {
   res.statusCode = status;
@@ -107,6 +109,30 @@ async function callGemini(body) {
   return { ok: response.ok, status: response.status, responseBody };
 }
 
+function usageKey(req) {
+  const forwarded = req.headers['x-forwarded-for'];
+  return (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : '') || req.socket?.remoteAddress || 'local';
+}
+function consumeDailyUsage(req) {
+  const day = new Date().toISOString().slice(0, 10);
+  const key = `${usageKey(req)}:${day}`;
+  const count = dailyUsage.get(key) || 0;
+  if (count >= DAILY_AI_LIMIT) return false;
+  dailyUsage.set(key, count + 1);
+  if (dailyUsage.size > 5000) {
+    for (const [entry] of dailyUsage) if (!entry.endsWith(`:${day}`)) dailyUsage.delete(entry);
+  }
+  return true;
+}
+function validateCurrency(value) {
+  const code = cleanText(value, 3).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(code)) throw new Error('A valid 3-letter currency code is required.');
+  return code;
+}
+function fxPrompt(from, to) {
+  return `Return only JSON matching {"rate":number,"confidence":"high|medium|low","note":"string"}. Estimate the current conversion rate from 1 ${from} to ${to} using your latest reliable knowledge. Never invent a precise live quote: if uncertain, use confidence low and explain that the user should verify the rate. Keep the rate positive, below 100000, and the note under 120 characters.`;
+}
+
 function upstreamError(status) {
   if (status === 429) return { status: 429, error: 'Gemini free-tier limit reached. Try again later.' };
   if (status === 503) return { status: 503, error: 'Gemini is busy right now. Try again in a moment.' };
@@ -123,9 +149,26 @@ export async function handleGeminiRequest(req, res) {
     return sendJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid request.' });
   }
   try {
-    const input = validateSnapshot(payload?.snapshot);
-    const mode = payload?.mode === 'chat' ? 'chat' : 'insight';
+    const mode = payload?.mode === 'chat' ? 'chat' : payload?.mode === 'fx' ? 'fx' : 'insight';
+    if (!consumeDailyUsage(req)) return sendJson(res, 429, { error: `Daily AI limit reached (${DAILY_AI_LIMIT} requests). Try again tomorrow.` });
+    if (mode === 'fx') {
+      const from = validateCurrency(payload?.from);
+      const to = validateCurrency(payload?.to);
+      if (from === to) return sendJson(res, 200, { rate: 1, confidence: 'high', note: 'Same currency.' });
+      const { ok, status, responseBody } = await callGemini({
+        systemInstruction: { parts: [{ text: 'You provide cautious currency conversion estimates. Never present an estimate as a guaranteed live market quote.' }] },
+        contents: [{ role: 'user', parts: [{ text: fxPrompt(from, to) }] }],
+        generationConfig: { temperature: 0.1, maxOutputTokens: 160, responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { rate: { type: 'NUMBER' }, confidence: { type: 'STRING' }, note: { type: 'STRING' } }, required: ['rate', 'confidence', 'note'] } },
+      });
+      if (!ok) { const failure = upstreamError(status); return sendJson(res, failure.status, { error: failure.error }); }
+      let parsed;
+      try { parsed = JSON.parse(responseBody?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'); } catch { throw new Error('Gemini returned an unreadable exchange rate.'); }
+      const rate = Number(parsed.rate);
+      if (!Number.isFinite(rate) || rate <= 0 || rate >= 100000) throw new Error('Gemini returned an invalid exchange rate.');
+      return sendJson(res, 200, { rate: round(rate), confidence: cleanText(parsed.confidence, 10) || 'low', note: cleanText(parsed.note, 120) || 'Verify this estimate before relying on it.' });
+    }
 
+    const input = validateSnapshot(payload?.snapshot);
     if (mode === 'chat') {
       const question = cleanText(payload?.question, 400);
       if (!question) throw new Error('Ask a question to continue.');

@@ -1,8 +1,8 @@
-# Budgetly differentiation and discoverability plan
+# Budgital differentiation and discoverability plan
 
 ## Product direction
 
-Budgetly stays a focused, browser-local budget app rather than becoming a bank-aggregation or wealth-management suite. The differentiator is: **free monthly budgeting without account linking, with portable CSV workflows, transparent local insights, dark mode, and optional aggregate-only Gemini assistance**.
+Budgital stays a focused, browser-local budget app rather than becoming a bank-aggregation or wealth-management suite. The differentiator is: **free monthly budgeting without account linking, with portable CSV workflows, transparent local insights, dark mode, and optional aggregate-only Gemini assistance**.
 
 ## Design direction
 
@@ -17,7 +17,7 @@ Budgetly stays a focused, browser-local budget app rather than becoming a bank-a
 - **Brand essence:** A calm, private monthly budget for people who want clarity without a financial super-app. Personality: clear, grounded, quietly capable.
 - **Brand voice:** Direct, non-judgmental, concrete. Example lines: “Your money, in plain English.” and “Only month totals leave the browser.”
 - **Wordmark / mark:** A rounded “B” tile with a cut corner, echoing a budget page tab and a small forward motion.
-- **Signature color:** Budgetly lime `#c8ee68`.
+- **Signature color:** Budgital lime `#c8ee68`.
 
 ## Implementation
 
@@ -56,3 +56,22 @@ Address the reported theme, contrast, AI, date-filtering, and mobile/tablet prob
 - `server/gemini.mjs` — aggregate-only validation, guardrails, and the insight/chat modes.
 - `index.html` — crawlable copy, metadata, WebApplication and FAQ structured data, and the pre-paint theme script.
 
+
+## Iteration 3 — Budgital brand, Apple-like public surface, currencies, and performance
+### Product direction
+- Rebrand visible product copy from Budgetly to **Budgital** while preserving existing `budgetly-*` local-storage keys so current users do not lose data.
+- Keep `/app` dedicated to the private workspace. Use `/` as a separate, crawlable landing page for Budgital and Lumina Metrics by FMR.
+- Position the author as **Lumina Metrics by FMR**, created by **Fareed M. Rifaideen**, with website, GitHub, LinkedIn, and Buy Me a Coffee links.
+### Design direction
+- **Movement:** Apple-like calm glassmorphism: generous whitespace, translucent panels, soft atmospheric gradients, rounded geometry, and restrained depth.
+- **Principles:** clarity before decoration; one obvious action per surface; motion should explain state; the data boundary stays visible.
+- **Palette:** preserve the deep forest ink, Budgital lime, peach attention, sky blue, and lavender category palette. Use lime as the signature brand color and forest as the high-contrast anchor.
+- **Landing layout:** editorial hero with a CSS-built product window, short trust strip, three differentiation cards, privacy orbit, author block, and FAQ. No heavy raster dependency was added; the art is CSS/SVG-like DOM so it loads quickly and remains sharp.
+- **Animation:** floating glass preview, rotating privacy orbit, animated startup orbit, hover lift, and reduced-motion fallback. App startup shows a branded splash with author credit.
+### Implementation
+- Lazy-load `App` and `LandingPage` from `src/main.tsx`; the landing route does not load the full dashboard component before the user chooses `/app`.
+- `src/LandingPage.tsx` owns public copy, FAQ, author links, JSON-LD, theme switch, and app CTA.
+- The app writes private-route metadata (`noindex,nofollow`) while the landing page remains indexable.
+- AI usage is capped at 12 browser-tracked requests per local day and 12 server-side requests per client/day. The UI shows remaining requests, and the proxy returns a readable 429.
+- Transactions can carry a currency and stored conversion rate. The base currency is persisted locally; Gemini's validated `fx` mode can refresh cautious estimates for non-base currencies. Conversion is explicitly described as an estimate to verify.
+- Production static assets receive immutable one-year caching while HTML remains revalidated.

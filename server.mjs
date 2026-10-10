@@ -15,6 +15,8 @@ function serve(res, filePath) {
   res.statusCode = 200;
   res.setHeader('Content-Type', mime[ext] || 'application/octet-stream');
   res.setHeader('X-Content-Type-Options', 'nosniff');
+  if (filePath.includes(`${path.sep}assets${path.sep}`)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  else if (ext === '.html') res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
   res.end(fs.readFileSync(filePath));
   return true;
 }
@@ -30,4 +32,4 @@ const server = http.createServer((req, res) => {
   }
 });
 
-server.listen(port, '0.0.0.0', () => console.log(`Budgetly server listening on ${port}`));
+server.listen(port, '0.0.0.0', () => console.log(`Budgital server listening on ${port}`));

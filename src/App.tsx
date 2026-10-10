@@ -12,6 +12,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  Coffee,
   Download,
   FileUp,
   Home,
@@ -33,6 +34,13 @@ import {
 } from 'lucide-react';
 
 type TransactionType = 'income' | 'expense';
+type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY';
+const currencyOptions: { code: CurrencyCode; label: string; symbol: string }[] = [
+  { code: 'USD', label: 'US Dollar', symbol: '$' }, { code: 'EUR', label: 'Euro', symbol: '€' }, { code: 'GBP', label: 'British Pound', symbol: '£' },
+  { code: 'LKR', label: 'Sri Lankan Rupee', symbol: 'Rs' }, { code: 'INR', label: 'Indian Rupee', symbol: '₹' }, { code: 'AUD', label: 'Australian Dollar', symbol: 'A$' },
+  { code: 'CAD', label: 'Canadian Dollar', symbol: 'C$' }, { code: 'JPY', label: 'Japanese Yen', symbol: '¥' },
+];
+function currencySymbol(code: CurrencyCode) { return currencyOptions.find((item) => item.code === code)?.symbol ?? code; }
 type View = 'overview' | 'transactions' | 'budgets' | 'data';
 type Theme = 'light' | 'dark';
 type AiInsight = { headline: string; bullets: string[]; nextStep: string };
@@ -55,6 +63,9 @@ type Transaction = {
   date: string;
   categoryId: string;
   description: string;
+  currency?: CurrencyCode;
+  fxRateToBase?: number;
+  fxSource?: string;
 };
 
 type Budget = {
@@ -62,17 +73,35 @@ type Budget = {
   amount: number;
 };
 
-type BudgetlyData = {
+type BudgitalData = {
   categories: Category[];
   transactions: Transaction[];
   budgets: Budget[];
   isDemo: boolean;
+  baseCurrency?: CurrencyCode;
 };
 
 type ImportRow = Transaction & { valid: boolean; error?: string };
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
+const AI_DAILY_LIMIT = 12;
+const AI_USAGE_KEY = 'budgital-ai-usage-v1';
+function usageToday() {
+  const day = localISO(new Date());
+  try {
+    const stored = JSON.parse(localStorage.getItem(AI_USAGE_KEY) ?? '{}') as { day?: string; count?: number };
+    return stored.day === day ? Math.max(0, Number(stored.count) || 0) : 0;
+  } catch { return 0; }
+}
+function consumeAiUse() {
+  const day = localISO(new Date());
+  const count = usageToday();
+  if (count >= AI_DAILY_LIMIT) return false;
+  localStorage.setItem(AI_USAGE_KEY, JSON.stringify({ day, count: count + 1 }));
+  return true;
+}
+
 const colors = ['#c8ee68', '#ffb59d', '#8cc4ff', '#caa7f8', '#f3cc69', '#75d2c1', '#f28c9a', '#9aa9a4'];
 const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
 const fullDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -110,7 +139,7 @@ const defaultCategories: Category[] = [
   { id: 'other-income', name: 'Other income', color: '#9aa9a4', kind: 'income' },
 ];
 
-function demoData(): BudgetlyData {
+function demoData(): BudgitalData {
   const month = currentMonth;
   const date = (day: number) => `${month}-${String(day).padStart(2, '0')}`;
   const previous = new Date();
@@ -141,18 +170,25 @@ function demoData(): BudgetlyData {
   };
 }
 
-function loadData(): BudgetlyData {
+function loadData(): BudgitalData {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) return JSON.parse(stored) as BudgetlyData;
+    if (stored) { const parsed = JSON.parse(stored) as BudgitalData; return { ...parsed, baseCurrency: parsed.baseCurrency ?? 'USD' }; }
   } catch {
     // Fall back to the friendly starter state when storage is unavailable.
   }
   return demoData();
 }
 
-function formatCurrency(value: number) {
-  return currencyFormatter.format(Math.abs(value));
+function formatCurrency(value: number, currency?: CurrencyCode) {
+  let active = currency;
+  if (!active) {
+    try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as { baseCurrency?: CurrencyCode }; active = stored.baseCurrency ?? 'USD'; } catch { active = 'USD'; }
+  }
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: active, maximumFractionDigits: active === 'JPY' ? 0 : 0 }).format(Math.abs(value));
+}
+function amountInBase(transaction: Transaction, baseCurrency: CurrencyCode = 'USD') {
+  return transaction.amount * (transaction.currency && transaction.currency !== baseCurrency ? (Number(transaction.fxRateToBase) || 1) : 1);
 }
 
 function formatCompactCurrency(value: number) {
@@ -277,7 +313,7 @@ function rangeLabel(range: DateRange) {
 const inRange = (date: string, range: DateRange) => date >= range.start && date <= range.end;
 
 export function App() {
-  const [data, setData] = useState<BudgetlyData>(loadData);
+  const [data, setData] = useState<BudgitalData>(loadData);
   const [view, setView] = useState<View>(readViewFromHash);
   const [anchor, setAnchor] = useState(currentMonth);
   const [preset, setPreset] = useState<RangePreset>('thisMonth');
@@ -294,11 +330,19 @@ export function App() {
   const [aiAsking, setAiAsking] = useState(false);
   const [aiError, setAiError] = useState('');
   const [aiFailedQuestion, setAiFailedQuestion] = useState('');
+  const [aiUsage, setAiUsage] = useState(usageToday);
+  const [splashVisible, setSplashVisible] = useState(true);
   const themeTransition = useRef(false);
 
   useEffect(() => {
+    document.title = 'Budgital — Personal budget workspace';
+    document.querySelector('meta[name=description]')?.setAttribute('content', 'Your private Budgital workspace for logging income, expenses, category plans, CSV backups, and optional AI help.');
+    document.querySelector('meta[name=robots]')?.setAttribute('content', 'noindex,nofollow');
+  }, []);
+  useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
+  useEffect(() => { const timer = window.setTimeout(() => setSplashVisible(false), 720); return () => window.clearTimeout(timer); }, []);
 
   useEffect(() => {
     const sync = () => setView(readViewFromHash());
@@ -365,26 +409,37 @@ export function App() {
   const rangeIncome = rangeTransactions.filter((transaction) => transaction.type === 'income');
   const categorySpend = useMemo(() => {
     const map = new Map<string, number>();
-    rangeExpenses.forEach((transaction) => map.set(transaction.categoryId, (map.get(transaction.categoryId) ?? 0) + transaction.amount));
+    rangeExpenses.forEach((transaction) => map.set(transaction.categoryId, (map.get(transaction.categoryId) ?? 0) + amountInBase(transaction, data.baseCurrency ?? 'USD')));
     return Array.from(map.entries()).map(([categoryId, amount]) => ({ category: getCategory(data.categories, categoryId), amount })).sort((a, b) => b.amount - a.amount);
   }, [data.categories, rangeExpenses]);
   const totals: Totals = useMemo(() => {
-    const income = rangeIncome.reduce((sum, transaction) => sum + transaction.amount, 0);
-    const expenses = rangeExpenses.reduce((sum, transaction) => sum + transaction.amount, 0);
+    const income = rangeIncome.reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0);
+    const expenses = rangeExpenses.reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0);
     const budgetMonths = budgetFactor(range);
     const budget = data.budgets.reduce((sum, item) => sum + item.amount, 0) * budgetMonths;
     return { income, expenses, budget, left: income - expenses, budgetLeft: budget - expenses, budgetMonths };
-  }, [data.budgets, range, rangeExpenses, rangeIncome]);
+  }, [data.baseCurrency, data.budgets, range, rangeExpenses, rangeIncome]);
 
-  function mutate(next: BudgetlyData) {
+  function mutate(next: BudgitalData) {
     setData({ ...next, isDemo: false });
   }
 
-  function handleSaveTransaction(transaction: Transaction) {
-    const exists = data.transactions.some((item) => item.id === transaction.id);
+  async function handleSaveTransaction(transaction: Transaction) {
+    let savedTransaction = transaction;
+    const baseCurrency = data.baseCurrency ?? 'USD';
+    if (transaction.currency && transaction.currency !== baseCurrency && transaction.fxSource === 'pending Gemini rate') {
+      try {
+        const result = await requestAi({ mode: 'fx', from: transaction.currency, to: baseCurrency });
+        savedTransaction = { ...transaction, fxRateToBase: Number(result.rate) || 1, fxSource: `Gemini estimate · ${String(result.confidence || 'low')}` };
+        setFxMessage(`${transaction.currency} → ${baseCurrency} rate updated automatically. Verify estimates in Data.`);
+      } catch (error) {
+        setFxMessage(error instanceof Error ? `${error.message} Entry kept at 1:1 until a rate is available.` : 'Rate unavailable. Entry kept at 1:1 until a rate is available.');
+      }
+    }
+    const exists = data.transactions.some((item) => item.id === savedTransaction.id);
     const transactions = exists
-      ? data.transactions.map((item) => (item.id === transaction.id ? transaction : item))
-      : [transaction, ...data.transactions];
+      ? data.transactions.map((item) => (item.id === savedTransaction.id ? savedTransaction : item))
+      : [savedTransaction, ...data.transactions];
     mutate({ ...data, transactions });
     setShowAdd(false);
     setEditingTransaction(null);
@@ -412,6 +467,27 @@ export function App() {
     setShowImport(false);
   }
 
+  const [fxMessage, setFxMessage] = useState('');
+  function handleBaseCurrencyChange(baseCurrency: CurrencyCode) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, baseCurrency }));
+    mutate({ ...data, baseCurrency });
+  }
+  async function refreshExchangeRates() {
+    const baseCurrency = data.baseCurrency ?? 'USD';
+    const currencies = Array.from(new Set(data.transactions.map((transaction) => transaction.currency).filter((currency): currency is CurrencyCode => Boolean(currency && currency !== baseCurrency))));
+    if (!currencies.length) { setFxMessage('Add a non-base-currency transaction first.'); return; }
+    setFxMessage('Updating AI exchange estimates…');
+    try {
+      const rates = new Map<CurrencyCode, number>();
+      for (const from of currencies) {
+        const result = await requestAi({ mode: 'fx', from, to: baseCurrency, snapshot: { totals: { income: 0, expenses: 0, budget: 0, left: 0 }, categorySpend: [] } });
+        rates.set(from, Number(result.rate));
+      }
+      mutate({ ...data, transactions: data.transactions.map((transaction) => transaction.currency && rates.has(transaction.currency) ? { ...transaction, fxRateToBase: rates.get(transaction.currency), fxSource: 'Gemini estimate' } : transaction) });
+      setFxMessage(`Updated ${rates.size} ${rates.size === 1 ? 'rate' : 'rates'} using Gemini estimates. Verify before relying on them.`);
+    } catch (error) { setFxMessage(error instanceof Error ? error.message : 'Could not update exchange rates.'); }
+  }
+
   function buildSnapshot() {
     const insights = buildInsights(data, range, totals, categorySpend);
     return {
@@ -423,6 +499,8 @@ export function App() {
   }
 
   async function requestAi(body: Record<string, unknown>) {
+    if (!consumeAiUse()) throw new Error(`Daily AI limit reached (${AI_DAILY_LIMIT} requests). Your limit resets tomorrow.`);
+    setAiUsage(usageToday());
     const response = await fetch('/api/gemini/insights', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -490,9 +568,10 @@ export function App() {
 
   function clearData() {
     if (!window.confirm('Clear all transactions and budgets? This cannot be undone.')) return;
-    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false });
+    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD' });
   }
 
+  if (splashVisible) return <SplashScreen theme={theme} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },
     { id: 'transactions' as const, label: 'Transactions', icon: Receipt },
@@ -505,7 +584,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">B</div>
-          <div><div className="brand-name">Budgetly</div><div className="brand-caption">Money, made clear.</div></div>
+          <div><div className="brand-name">Budgital</div><div className="brand-caption">Money, made clear.</div></div>
         </div>
         <nav className="side-nav" aria-label="Main navigation">
           <p className="nav-eyebrow">Workspace</p>
@@ -516,7 +595,7 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div>
+          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
           <button className="profile-button"><span className="avatar">JD</span><span className="profile-copy"><strong>Jordan Doe</strong><small>Personal account</small></span><MoreHorizontal size={17} /></button>
         </div>
       </aside>
@@ -543,21 +622,21 @@ export function App() {
           {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onAi={runAiInsights} onOpenRange={() => setShowRange(true)} />}
           {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} />}
           {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
-          {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} />}
+          {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} baseCurrency={data.baseCurrency ?? 'USD'} onBaseCurrencyChange={handleBaseCurrencyChange} onRefreshRates={refreshExchangeRates} fxMessage={fxMessage} />}
         </div>
       </main>
 
       <TabBar view={view} onNavigate={goTo} onAdd={() => { setEditingTransaction(null); setShowAdd(true); }} />
 
       {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
-      {showAdd && <TransactionModal data={data} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
+      {showAdd && <TransactionModal data={data} baseCurrency={data.baseCurrency ?? 'USD'} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
-      {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} />}
+      {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
 }
 
-function Overview({ data, range, totals, expenses, categorySpend, onNavigate, onAdd, onClear, onAi, onOpenRange }: { data: BudgetlyData; range: DateRange; totals: Totals; expenses: Transaction[]; categorySpend: { category: Category; amount: number }[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void; onOpenRange: () => void }) {
+function Overview({ data, range, totals, expenses, categorySpend, onNavigate, onAdd, onClear, onAi, onOpenRange }: { data: BudgitalData; range: DateRange; totals: Totals; expenses: Transaction[]; categorySpend: { category: Category; amount: number }[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void; onOpenRange: () => void }) {
   const insights = buildInsights(data, range, totals, categorySpend);
   const percentUsed = totals.budget ? Math.min(totals.expenses / totals.budget, 1.2) : 0;
   const recent = [...expenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
@@ -575,7 +654,7 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
         <h1>Your money, in plain English.</h1>
         <p>Showing <strong>{rangeLabel(range)}</strong>{totals.budgetMonths > 1.02 ? ` · ${formatMonthCount(totals.budgetMonths)} months of plans combined` : ''}. <button className="inline-link" onClick={onOpenRange}>Change dates</button></p>
       </div>
-      <div className="intro-actions">{data.isDemo && <button className="ghost-button" onClick={onClear}><Trash2 size={15} /> Clear sample data</button>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgetly AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
+      <div className="intro-actions">{data.isDemo && <span className="sample-badge"><Sparkles size={13} /> Starter view · edit in Data</span>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgital AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
     </section>
 
     <section className="hero-grid">
@@ -599,14 +678,14 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
   </>;
 }
 
-function SpendingDonut({ data, categorySpend, total, onViewAll }: { data: BudgetlyData; categorySpend: { category: Category; amount: number }[]; total: number; onViewAll: () => void }) {
+function SpendingDonut({ data, categorySpend, total, onViewAll }: { data: BudgitalData; categorySpend: { category: Category; amount: number }[]; total: number; onViewAll: () => void }) {
   const radius = 68;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
   return <div className="panel chart-panel donut-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Where it goes</div><h2>Spending by category</h2></div><button className="icon-button" aria-label="Open budgets" onClick={onViewAll}><MoreHorizontal size={19} /></button></div><div className="donut-content"><div className="donut-wrap"><svg viewBox="0 0 180 180" className="donut-chart"><circle cx="90" cy="90" r={radius} fill="none" className="donut-track" strokeWidth="18" />{categorySpend.map(({ category, amount }) => { const portion = total ? amount / total : 0; const dash = portion * circumference; const segment = <circle key={category.id} cx="90" cy="90" r={radius} fill="none" stroke={category.color} strokeWidth="18" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" transform="rotate(-90 90 90)" />; offset += dash; return segment; })}</svg><div className="donut-center"><strong>{formatCompactCurrency(total)}</strong><span>total spent</span></div></div><div className="legend">{categorySpend.length ? categorySpend.slice(0, 5).map(({ category, amount }) => <div className="legend-item" key={category.id}><span className="legend-swatch" style={{ background: category.color }} /><span>{category.name}</span><strong>{total ? Math.round(amount / total * 100) : 0}%</strong></div>) : <EmptyState title="No spending yet" copy="Your category mix will show up here." />}</div></div></div>;
 }
 
-function TrendChart({ data, range }: { data: BudgetlyData; range: DateRange }) {
+function TrendChart({ data, range }: { data: BudgitalData; range: DateRange }) {
   const monthCount = Math.min(Math.max(monthsCovered(range), 3), 12);
   const endMonth = range.end.slice(0, 7);
   const months = Array.from({ length: monthCount }, (_, index) => shiftMonth(endMonth, index - (monthCount - 1)));
@@ -615,7 +694,7 @@ function TrendChart({ data, range }: { data: BudgetlyData; range: DateRange }) {
   return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> last {monthCount} months</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>$0</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === endMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
 }
 
-function buildInsights(data: BudgetlyData, range: DateRange, totals: Totals, categorySpend: { category: Category; amount: number }[]) {
+function buildInsights(data: BudgitalData, range: DateRange, totals: Totals, categorySpend: { category: Category; amount: number }[]) {
   const insights: { title: string; copy: string; tone: string; icon: string }[] = [];
   const months = totals.budgetMonths;
   const budgetMap = new Map(data.budgets.map((budget) => [budget.categoryId, budget.amount * months]));
@@ -633,7 +712,7 @@ function buildInsights(data: BudgetlyData, range: DateRange, totals: Totals, cat
   }
   const largest = categorySpend[0];
   if (largest) insights.push({ title: `${largest.category.name} is your biggest line item`, copy: `It makes up ${Math.round(largest.amount / Math.max(totals.expenses, 1) * 100)}% of spending in ${rangeLabel(range)}.`, tone: 'neutral', icon: '•' });
-  if (!insights.length) insights.push({ title: 'You’re ready to build a baseline', copy: 'Log a few transactions and Budgetly will start calling out patterns.', tone: 'positive', icon: '✓' });
+  if (!insights.length) insights.push({ title: 'You’re ready to build a baseline', copy: 'Log a few transactions and Budgital will start calling out patterns.', tone: 'positive', icon: '✓' });
   if (totals.left >= 0 && totals.income > 0) insights.push({ title: `${formatCurrency(totals.left)} is still unallocated`, copy: 'That’s the room you have after income and spending in this period.', tone: 'positive', icon: '✓' });
   return insights.slice(0, 3);
 }
@@ -642,7 +721,7 @@ function TransactionRow({ transaction, category }: { transaction: Transaction; c
   return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</strong></div>;
 }
 
-function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange }: { data: BudgetlyData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void }) {
+function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange }: { data: BudgitalData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void }) {
   const [filter, setFilter] = useState<'all' | TransactionType>('all');
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState('all');
@@ -691,7 +770,7 @@ function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd,
   </>;
 }
 
-function TransactionCards({ data, transactions, onEdit, onDelete }: { data: BudgetlyData; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
+function TransactionCards({ data, transactions, onEdit, onDelete }: { data: BudgitalData; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
   return <div className="tx-cards">{transactions.map((transaction) => {
     const category = getCategory(data.categories, transaction.categoryId);
     return <div className="tx-card" key={transaction.id}>
@@ -702,28 +781,37 @@ function TransactionCards({ data, transactions, onEdit, onDelete }: { data: Budg
   })}</div>;
 }
 
-function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { data: BudgetlyData; month: string; onBudgetChange: (categoryId: string, amount: number) => void; onAddCategory: (name: string, kind: Category['kind']) => Category; onShift: (delta: number) => void }) {
+function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { data: BudgitalData; month: string; onBudgetChange: (categoryId: string, amount: number) => void; onAddCategory: (name: string, kind: Category['kind']) => Category; onShift: (delta: number) => void }) {
   const [newCategory, setNewCategory] = useState('');
   const expenseCategories = data.categories.filter((category) => category.kind !== 'income');
-  return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + transaction.amount, 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
+  return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
 }
 
-function DataView({ data, onImport, onExport, onClear }: { data: BudgetlyData; onImport: () => void; onExport: () => void; onClear: () => void }) {
-  return <><section className="page-intro compact"><div><div className="kicker"><FileUp size={14} /> Your data, your rules</div><h1>Import & export</h1><p>Everything stays local. Move a copy whenever you need one.</p></div><span className="local-badge"><span className="local-pulse" /> Local-only storage</span></section><div className="data-grid"><div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Expected columns: date, type, amount, category, description</div></div><div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download your transactions, categories, and budgets as one CSV file you can keep or edit.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export</div></div></div><div className="panel safety-panel"><div className="safety-icon"><Landmark size={19} /></div><div><h2>Private by default</h2><p>Budgetly does not send your numbers anywhere. Clearing browser storage or using a different browser will create a separate budget.</p></div><button className="text-button danger-text" onClick={onClear}><Trash2 size={15} /> Clear all data</button></div></>;
+function DataView({ data, onImport, onExport, onClear, baseCurrency, onBaseCurrencyChange, onRefreshRates, fxMessage }: { data: BudgitalData; onImport: () => void; onExport: () => void; onClear: () => void; baseCurrency: CurrencyCode; onBaseCurrencyChange: (currency: CurrencyCode) => void; onRefreshRates: () => void; fxMessage: string }) {
+  return <>
+    <section className="page-intro compact"><div><div className="kicker"><FileUp size={14} /> Your data, your rules</div><h1>Import & export</h1><p>Everything stays local. Move a copy whenever you need one.</p></div><span className="local-badge"><span className="local-pulse" /> Local-only storage</span></section>
+    <div className="data-grid">
+      <div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Expected columns: date, type, amount, category, description</div></div>
+      <div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download your transactions, categories, and budgets as one CSV file you can keep or edit.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export</div></div>
+    </div>
+    <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Multi-currency, one clear base</h2><p>Log entries in USD, EUR, GBP, LKR, INR, AUD, CAD, or JPY. Gemini can refresh cautious conversion estimates for your base currency.</p></div><label className="currency-setting"><span>Base currency</span><select value={baseCurrency} onChange={(event) => onBaseCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}</div>
+    <div className="panel safety-panel"><div className="safety-icon"><Landmark size={19} /></div><div><h2>Private by default</h2><p>Budgital does not send your numbers anywhere. Clearing browser storage or using a different browser will create a separate budget.</p></div>{data.isDemo && <button className="text-button" onClick={onClear}><Trash2 size={15} /> Clear starter data</button>}<button className="text-button danger-text" onClick={onClear}><Trash2 size={15} /> Clear all data</button></div>
+  </>;
 }
-
-function TransactionModal({ data, month, categories, transaction, onClose, onSave }: { data: BudgetlyData; month: string; categories: Category[]; transaction: Transaction | null; onClose: () => void; onSave: (transaction: Transaction) => void }) {
+function TransactionModal({ data, baseCurrency, month, categories, transaction, onClose, onSave }: { data: BudgitalData; baseCurrency: CurrencyCode; month: string; categories: Category[]; transaction: Transaction | null; onClose: () => void; onSave: (transaction: Transaction) => void }) {
   const [type, setType] = useState<TransactionType>(transaction?.type ?? 'expense');
   const [amount, setAmount] = useState(transaction?.amount.toString() ?? '');
   const [date, setDate] = useState(transaction?.date ?? `${month}-${String(new Date().getDate()).padStart(2, '0')}`);
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? categories.find((category) => category.kind !== 'income')?.id ?? categories[0]?.id ?? '');
   const [description, setDescription] = useState(transaction?.description ?? '');
+  const [currency, setCurrency] = useState<CurrencyCode>(transaction?.currency ?? baseCurrency);
+  const [fxRate, setFxRate] = useState(String(transaction?.fxRateToBase ?? ''));
   const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
   useEffect(() => { if (!available.some((category) => category.id === categoryId)) setCategoryId(available[0]?.id ?? ''); }, [type]);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>$</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label><label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim() })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
 }
 
-function ImportModal({ data, onClose, onImport }: { data: BudgetlyData; onClose: () => void; onImport: (rows: ImportRow[]) => void }) {
+function ImportModal({ data, onClose, onImport }: { data: BudgitalData; onClose: () => void; onImport: (rows: ImportRow[]) => void }) {
   const [rows, setRows] = useState<ImportRow[]>([]);
   const [fileName, setFileName] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -750,19 +838,21 @@ function parseCsv(text: string, categories: Category[]): ImportRow[] {
     const amount = Number(String(values.amount).replace(/[$,]/g, ''));
     const categoryName = values.category || 'Uncategorized';
     const existing = categories.find((category) => category.name.toLowerCase() === categoryName.toLowerCase());
+    const currency = currencyOptions.some((item) => item.code === values.currency?.toUpperCase()) ? values.currency.toUpperCase() as CurrencyCode : undefined;
+    const fxRateToBase = Number(values.fxratetobase || values.fxrate || 0) || undefined;
     const error = !/^\d{4}-\d{2}-\d{2}$/.test(date) ? 'Date format' : !amount || amount <= 0 ? 'Amount' : !existing ? 'Category' : undefined;
-    return { id: `import-${index}-${makeId()}`, type: type as TransactionType, amount, date, categoryId: existing?.id ?? '', description: values.description || categoryName, valid: !error, error };
+    return { id: `import-${index}-${makeId()}`, type: type as TransactionType, amount, date, categoryId: existing?.id ?? '', description: values.description || categoryName, currency, fxRateToBase, fxSource: fxRateToBase ? 'CSV rate' : undefined, valid: !error, error };
   });
 }
 
-function exportCsv(data: BudgetlyData) {
-  const rows = [['date', 'type', 'amount', 'category', 'description'], ...data.transactions.map((transaction) => [transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description])];
+function exportCsv(data: BudgitalData) {
+  const rows = [['date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase'], ...data.transactions.map((transaction) => [transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : ''])];
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = `budgetly-export-${isoDate()}.csv`;
+  anchor.download = `budgital-export-${isoDate()}.csv`;
   anchor.click();
   URL.revokeObjectURL(url);
 }
@@ -830,7 +920,7 @@ function TabBar({ view, onNavigate, onAdd }: { view: View; onNavigate: (view: Vi
   </nav>;
 }
 
-function AiConversation({ loading, insight, messages, asking, error, range, failedQuestion, onClose, onRetry, onRetryFollowUp, onAsk }: { loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; failedQuestion: string; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
+function AiConversation({ loading, insight, messages, asking, error, range, failedQuestion, aiRemaining, onClose, onRetry, onRetryFollowUp, onAsk }: { loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; failedQuestion: string; aiRemaining: number; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
   const [draft, setDraft] = useState('');
   const suggestions = ['Why is my biggest category so high?', 'Which category grew fastest?', 'How can I free up $200 next month?'];
   const submit = (question: string) => {
@@ -840,10 +930,10 @@ function AiConversation({ loading, insight, messages, asking, error, range, fail
   };
   return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="modal ai-modal">
-      <div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Budgetly AI · {rangeLabel(range)}</div><h2>Ask about this period</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Budgital AI · {rangeLabel(range)}</div><h2>Ask about this period</h2><small className="ai-quota">{aiRemaining} AI {aiRemaining === 1 ? 'request' : 'requests'} left today</small></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       <div className="ai-privacy"><ShieldCheckIcon /><span>Only totals, category totals, and your local insights are sent. Individual transactions and descriptions stay in this browser.</span></div>
       <p className="ai-disclaimer">Free-tier Gemini content may be used by Google to improve products. Keep AI off for strictly local-only budgeting.</p>
-      {loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your period…</strong><p>Budgetly is asking Gemini for a concise second opinion.</p></div>}
+      {loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your period…</strong><p>Budgital is asking Gemini for a concise second opinion.</p></div>}
       {!loading && <>
         {(insight || messages.length > 0) && <div className="ai-thread">
           {insight && <div className="ai-bubble intro">
@@ -868,4 +958,8 @@ function AiConversation({ loading, insight, messages, asking, error, range, fail
 
 function ShieldCheckIcon() {
   return <span className="shield-check"><Check size={13} /></span>;
+}
+
+function SplashScreen({ theme }: { theme: Theme }) {
+  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo">B</div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
 }

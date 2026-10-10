@@ -1,10 +1,10 @@
-# Budgetly SEO, AEO, GEO, and Gemini research
+# Budgital SEO, AEO, GEO, and Gemini research
 
 ## Product position to own
 
-Budgetly should position itself as a **free, private, local-first budget app with optional explainable AI**. The strongest contrast is not “more features than Monarch or Copilot.” It is “start budgeting without linking a bank account, creating an account, or accepting a recurring subscription.”
+Budgital should position itself as a **free, private, local-first budget app with optional explainable AI**. The strongest contrast is not “more features than Monarch or Copilot.” It is “start budgeting without linking a bank account, creating an account, or accepting a recurring subscription.”
 
-The current competitor survey found that most large products sell connected-account automation, a named method, or a broad money dashboard. Budgetly can win a narrower job: make one month understandable in a few minutes, with manual/CSV-first control, transparent local calculations, portable backups, and AI that is opt-in rather than the product’s source of truth.
+The current competitor survey found that most large products sell connected-account automation, a named method, or a broad money dashboard. Budgital can win a narrower job: make one month understandable in a few minutes, with manual/CSV-first control, transparent local calculations, portable backups, and AI that is opt-in rather than the product’s source of truth.
 
 ## Keyword and query clusters
 
@@ -32,11 +32,11 @@ The GEO research paper defines generative-engine optimization as improving the v
 
 ## Gemini implementation facts
 
-Google’s Gemini pricing page says the free tier provides access to Google AI Studio and free input/output tokens for certain models, but also says free-tier content is used to improve Google products. Paid usage says content is not used to improve products. Budgetly therefore describes the AI feature as optional and sends only aggregate totals, not raw transaction descriptions.[5]
+Google’s Gemini pricing page says the free tier provides access to Google AI Studio and free input/output tokens for certain models, but also says free-tier content is used to improve Google products. Paid usage says content is not used to improve products. Budgital therefore describes the AI feature as optional and sends only aggregate totals, not raw transaction descriptions.[5]
 
-Google’s rate-limit documentation says quotas are measured across requests per minute, input tokens per minute, and requests per day. Limits are applied per project, not per API key, and free-tier/model limits may change. Budgetly handles a 429 response with a user-readable retry message.[6]
+Google’s rate-limit documentation says quotas are measured across requests per minute, input tokens per minute, and requests per day. Limits are applied per project, not per API key, and free-tier/model limits may change. Budgital handles a 429 response with a user-readable retry message.[6]
 
-Google’s API-key guidance says to treat the key like a password, never check it into source control, never expose it in client-side production code, and use a server-side proxy. Budgetly follows that pattern: the key is stored as a project secret and the browser calls `/api/gemini/insights` without receiving the key.[7]
+Google’s API-key guidance says to treat the key like a password, never check it into source control, never expose it in client-side production code, and use a server-side proxy. Budgital follows that pattern: the key is stored as a project secret and the browser calls `/api/gemini/insights` without receiving the key.[7]
 
 ## AI citation / answer-engine design rules
 

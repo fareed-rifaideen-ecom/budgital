@@ -8,63 +8,35 @@
       (function () {
         try {
           var stored = JSON.parse(localStorage.getItem('budgetly-settings-v1') || '{}');
-          var theme = stored.theme === 'dark' || stored.theme === 'light'
-            ? stored.theme
-            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          var theme = stored.theme === 'dark' || stored.theme === 'light' ? stored.theme : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
           document.documentElement.dataset.theme = theme;
-          var meta = document.querySelector('meta[name="theme-color"]');
-          if (meta) meta.setAttribute('content', theme === 'dark' ? '#0d1714' : '#f5f6f1');
+          document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#0d1714' : '#f5f6f1');
         } catch (error) {
           var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
           document.documentElement.dataset.theme = prefersDark ? 'dark' : 'light';
-          var fallbackMeta = document.querySelector('meta[name="theme-color"]');
-          if (fallbackMeta) fallbackMeta.setAttribute('content', prefersDark ? '#0d1714' : '#f5f6f1');
+          document.querySelector('meta[name="theme-color"]')?.setAttribute('content', prefersDark ? '#0d1714' : '#f5f6f1');
         }
       })();
     </script>
-    <meta name="description" content="Budgetly is a free private budget app for monthly budgets, expense tracking, CSV import, and optional AI insights without linking a bank account." />
-    <meta name="keywords" content="personal budget app, free budget app, private budgeting app, monthly budget planner, expense tracker, CSV budget import, local budget app, AI budget insights" />
+    <meta name="description" content="Budgital is a private, browser-first personal budget app for tracking income, expenses, category budgets, insights, and portable CSV backups." />
+    <meta name="keywords" content="Budgital, private budget app, personal budget app, monthly budget planner, expense tracker, local budget app, CSV budget import, AI budget insights" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
     <link rel="canonical" href="https://8328-ivf8ohokt0tjlsia836tl-673d8326.sg2.manus.computer/" />
     <meta property="og:type" content="website" />
-    <meta property="og:site_name" content="Budgetly" />
-    <meta property="og:title" content="Budgetly — Free private budget app" />
-    <meta property="og:description" content="Plan a month, track spending, and understand your money without linking a bank account." />
+    <meta property="og:site_name" content="Budgital" />
+    <meta property="og:title" content="Budgital — A calmer way to budget" />
+    <meta property="og:description" content="Track a clear month, stay local, and understand your money without linking a bank account." />
     <meta property="og:url" content="https://8328-ivf8ohokt0tjlsia836tl-673d8326.sg2.manus.computer/" />
     <meta property="og:image" content="https://files.manuscdn.com/user_upload_by_module/session_file/310519663781523392/GfyKzdHcXMkRzLao.svg" />
     <meta name="twitter:card" content="summary" />
-    <meta name="twitter:title" content="Budgetly — Free private budget app" />
-    <meta name="twitter:description" content="A browser-local budget planner with CSV tools, clear monthly insights, dark mode, and optional Gemini AI." />
+    <meta name="twitter:title" content="Budgital — A calmer way to budget" />
+    <meta name="twitter:description" content="A private, browser-first personal budget with category envelopes, CSV workflows, and optional aggregate-only AI." />
     <meta name="twitter:image" content="https://files.manuscdn.com/user_upload_by_module/session_file/310519663781523392/GfyKzdHcXMkRzLao.svg" />
-    <title>Budgetly — Free private budget app with AI insights</title>
-    <script type="application/ld+json">
-      {"@context":"https://schema.org","@type":"WebApplication","name":"Budgetly","url":"https://8328-ivf8ohokt0tjlsia836tl-673d8326.sg2.manus.computer/","applicationCategory":"FinanceApplication","operatingSystem":"Web browser","isAccessibleForFree":true,"description":"A private browser-local budget app for monthly budgets, expense tracking, CSV import and optional AI insights.","featureList":["Monthly category budgets","Income and expense tracking","CSV import and export","Spending charts","Dark mode","Optional Gemini AI insights"],"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
-    </script>
-    <script type="application/ld+json">
-      {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
-        {"@type":"Question","name":"Is Budgetly free to use?","acceptedAnswer":{"@type":"Answer","text":"Yes. Budgetly is a free browser-based budget app. There is no account, no subscription, and no bank connection required."}},
-        {"@type":"Question","name":"Does Budgetly connect to my bank?","acceptedAnswer":{"@type":"Answer","text":"No. Budgetly is local-first, so it never connects to a bank. You log income and expenses manually or import a CSV file, and the working budget stays in your browser."}},
-        {"@type":"Question","name":"What data does the optional AI feature send?","acceptedAnswer":{"@type":"Answer","text":"Only aggregate figures for the selected date range: totals plus category totals and the local insight headlines. Individual transactions, merchant descriptions, and dates stay in your browser."}},
-        {"@type":"Question","name":"Can I set a monthly budget per category?","acceptedAnswer":{"@type":"Answer","text":"Yes. Each expense category can have its own monthly amount, and Budgetly shows how much is left or how far over the plan you are. Multi-month ranges compare several monthly plans against the spending inside the range."}},
-        {"@type":"Question","name":"Can I export or import my data?","acceptedAnswer":{"@type":"Answer","text":"Yes. Budgetly exports your transactions, categories, and budgets as a CSV backup, and imports CSV files from a bank or spreadsheet after validating the columns."}}
-      ]}
-    </script>
+    <title>Budgital — A calmer way to budget</title>
+    <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Budgital","applicationCategory":"FinanceApplication","operatingSystem":"Web browser","isAccessibleForFree":true,"description":"A private browser-local budget app for monthly budgets, expense tracking, CSV import, and optional aggregate-only AI insights.","author":{"@type":"Person","name":"Fareed M. Rifaideen","url":"https://fareed-rifaideen.netlify.app/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   </head>
   <body>
-    <div id="root"></div>
-    <section class="seo-content" aria-label="About Budgetly">
-      <div class="seo-content-inner">
-        <p class="seo-kicker">A calmer way to budget</p>
-        <h2 class="seo-title">Free private budget app for monthly spending</h2>
-        <p>Budgetly helps you log income and expenses, plan a monthly amount for each category, and see what is left. It works in your browser without a bank connection or account, so you can start with manual entries or import a CSV.</p>
-        <div class="seo-answer-grid">
-          <article><h2>What makes Budgetly different?</h2><p>Budgetly is local-first: your working budget stays in this browser unless you export it or choose to send aggregate totals to the optional Gemini insight feature.</p></article>
-          <article><h2>What can I track?</h2><p>Track income, expenses, categories, monthly budgets, spending by category, and month-over-month changes. Use the dashboard for plain-English signals instead of a spreadsheet full of formulas.</p></article>
-          <article><h2>Can I use AI privately?</h2><p>Yes, optionally. Budgetly sends only month totals and category totals to its server-side Gemini proxy. Individual transactions and descriptions remain local.</p></article>
-        </div>
-        <nav class="seo-links" aria-label="Budgeting guides"><a href="/learn/how-to-make-a-monthly-budget/">How to make a monthly budget</a><a href="/learn/how-to-budget-without-linking-a-bank-account/">How to budget without linking a bank account</a><a href="/learn/50-30-20-vs-zero-based-budget/">50/30/20 vs zero-based budgeting</a><a href="/learn/private-ai-budgeting/">Private AI budgeting guide</a></nav>
-      </div>
-    </section>
+    <div id="root"><main class="seo-fallback"><p>Browser-first personal budgeting by Lumina Metrics by FMR.</p><h1>Budgital — a calmer way to budget</h1><p>Track income, expenses, monthly category budgets, CSV backups, and optional aggregate-only AI insights. Your budget stays in this browser.</p><p><a href="/app">Open Budgital</a></p></main></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
