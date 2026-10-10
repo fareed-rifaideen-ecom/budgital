@@ -3,6 +3,7 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   BarChart3,
+  Bot,
   CalendarDays,
   Check,
   ChevronDown,
@@ -14,11 +15,14 @@ import {
   Home,
   Landmark,
   Menu,
+  Monitor,
+  Moon,
   MoreHorizontal,
   Plus,
   Receipt,
   Settings2,
   Sparkles,
+  Sun,
   Tags,
   Trash2,
   Upload,
@@ -28,6 +32,8 @@ import {
 
 type TransactionType = 'income' | 'expense';
 type View = 'overview' | 'transactions' | 'budgets' | 'data';
+type Theme = 'system' | 'light' | 'dark';
+type AiResult = { headline: string; bullets: string[]; nextStep: string };
 
 type Category = {
   id: string;
@@ -60,6 +66,7 @@ type BudgetlyData = {
 type ImportRow = Transaction & { valid: boolean; error?: string };
 
 const STORAGE_KEY = 'budgetly-data-v1';
+const SETTINGS_KEY = 'budgetly-settings-v1';
 const colors = ['#c8ee68', '#ffb59d', '#8cc4ff', '#caa7f8', '#f3cc69', '#75d2c1', '#f28c9a', '#9aa9a4'];
 const monthFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', year: 'numeric' });
 const fullDateFormatter = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -69,6 +76,15 @@ const makeId = () => `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
 const monthKey = (date: string) => date.slice(0, 7);
 const currentMonth = isoDate().slice(0, 7);
+
+function loadTheme(): Theme {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as { theme?: Theme };
+    return stored.theme === 'light' || stored.theme === 'dark' || stored.theme === 'system' ? stored.theme : 'system';
+  } catch {
+    return 'system';
+  }
+}
 
 const defaultCategories: Category[] = [
   { id: 'rent', name: 'Housing', color: '#8cc4ff', kind: 'expense' },
@@ -153,10 +169,22 @@ export function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showMobileNav, setShowMobileNav] = useState(false);
+  const [theme, setTheme] = useState<Theme>(loadTheme);
+  const [showAi, setShowAi] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [aiError, setAiError] = useState('');
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
+
+  useEffect(() => {
+    const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
+    document.documentElement.dataset.theme = resolved;
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', resolved === 'dark' ? '#0d1714' : '#f5f6f1');
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme }));
+  }, [theme]);
 
   const monthTransactions = useMemo(
     () => data.transactions.filter((transaction) => monthKey(transaction.date) === selectedMonth),
@@ -207,6 +235,30 @@ export function App() {
     setShowImport(false);
   }
 
+  async function runAiInsights() {
+    setShowAi(true);
+    setAiLoading(true);
+    setAiError('');
+    setAiResult(null);
+    const categoryMap = new Map<string, number>();
+    monthExpenses.forEach((transaction) => categoryMap.set(transaction.categoryId, (categoryMap.get(transaction.categoryId) ?? 0) + transaction.amount));
+    const categorySpend = Array.from(categoryMap.entries()).map(([categoryId, amount]) => ({ category: getCategory(data.categories, categoryId).name, amount }));
+    try {
+      const response = await fetch('/api/gemini/insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ month: selectedMonth, totals, categorySpend, localInsights: buildInsights(data, selectedMonth, totals, categorySpend.map(({ category, amount }) => ({ category: data.categories.find((item) => item.name === category) ?? { id: category, name: category, color: '#9aa9a4', kind: 'both' as const }, amount }))) }),
+      });
+      const result = await response.json() as AiResult & { error?: string };
+      if (!response.ok) throw new Error(result.error || 'The AI service could not respond.');
+      setAiResult(result);
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   function clearData() {
     if (!window.confirm('Clear all transactions and budgets? This cannot be undone.')) return;
     mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false });
@@ -247,12 +299,13 @@ export function App() {
           <div className="crumb"><span>Personal workspace</span><ChevronRight size={15} /><strong>{nav.find((item) => item.id === view)?.label}</strong></div>
           <div className="topbar-actions">
             <button className="month-picker" onClick={() => setSelectedMonth(selectedMonth === currentMonth ? shiftMonth(selectedMonth, -1) : currentMonth)}><CalendarDays size={16} /><span>{getMonthLabel(selectedMonth)}</span><ChevronDown size={15} /></button>
+            <ThemeToggle theme={theme} onChange={setTheme} />
             <button className="primary-button small" onClick={() => { setEditingTransaction(null); setShowAdd(true); }}><Plus size={16} /> Add transaction</button>
           </div>
         </header>
 
         <div className="content-wrap">
-          {view === 'overview' && <Overview data={data} selectedMonth={selectedMonth} totals={totals} monthExpenses={monthExpenses} onNavigate={setView} onAdd={() => setShowAdd(true)} onClear={clearData} />}
+          {view === 'overview' && <Overview data={data} selectedMonth={selectedMonth} totals={totals} monthExpenses={monthExpenses} onNavigate={setView} onAdd={() => setShowAdd(true)} onClear={clearData} onAi={runAiInsights} />}
           {view === 'transactions' && <TransactionsView data={data} month={selectedMonth} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} />}
           {view === 'budgets' && <BudgetsView data={data} month={selectedMonth} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} />}
           {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} />}
@@ -261,11 +314,12 @@ export function App() {
 
       {showAdd && <TransactionModal data={data} month={selectedMonth} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {showAi && <AiInsightsModal loading={aiLoading} result={aiResult} error={aiError} onClose={() => setShowAi(false)} onRetry={runAiInsights} />}
     </div>
   );
 }
 
-function Overview({ data, selectedMonth, totals, monthExpenses, onNavigate, onAdd, onClear }: { data: BudgetlyData; selectedMonth: string; totals: { income: number; expenses: number; budget: number; left: number; budgetLeft: number }; monthExpenses: Transaction[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void }) {
+function Overview({ data, selectedMonth, totals, monthExpenses, onNavigate, onAdd, onClear, onAi }: { data: BudgetlyData; selectedMonth: string; totals: { income: number; expenses: number; budget: number; left: number; budgetLeft: number }; monthExpenses: Transaction[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void }) {
   const categorySpend = useMemo(() => {
     const map = new Map<string, number>();
     monthExpenses.forEach((transaction) => map.set(transaction.categoryId, (map.get(transaction.categoryId) ?? 0) + transaction.amount));
@@ -278,7 +332,7 @@ function Overview({ data, selectedMonth, totals, monthExpenses, onNavigate, onAd
   return <>
     <section className="page-intro">
       <div><div className="kicker"><Sparkles size={14} /> Your monthly pulse</div><h1>Your money, in plain English.</h1><p>Here’s what’s happening with your spending in <strong>{getMonthLabel(selectedMonth)}</strong>.</p></div>
-      <div className="intro-actions">{data.isDemo && <button className="ghost-button" onClick={onClear}><Trash2 size={15} /> Clear sample data</button>}<button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
+      <div className="intro-actions">{data.isDemo && <button className="ghost-button" onClick={onClear}><Trash2 size={15} /> Clear sample data</button>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgetly AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
     </section>
 
     <section className="hero-grid">
@@ -416,4 +470,19 @@ function exportCsv(data: BudgetlyData) {
 
 function EmptyState({ title, copy }: { title: string; copy: string }) {
   return <div className="empty-state"><span><Receipt size={17} /></span><strong>{title}</strong><p>{copy}</p></div>;
+}
+
+
+function ThemeToggle({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
+  const nextTheme = theme === 'system' ? 'dark' : theme === 'dark' ? 'light' : 'system';
+  const Icon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
+  return <button className="theme-toggle" onClick={() => onChange(nextTheme)} aria-label={`Theme: ${theme}. Switch to ${nextTheme}`} title={`Theme: ${theme}`}><Icon size={16} /><span>{theme}</span></button>;
+}
+
+function AiInsightsModal({ loading, result, error, onClose, onRetry }: { loading: boolean; result: AiResult | null; error: string; onClose: () => void; onRetry: () => void }) {
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal ai-modal"><div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Optional AI read</div><h2>Make this month clearer</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="ai-privacy"><ShieldCheckIcon /><span>Only month totals, category totals, and existing local insights are sent. Descriptions and individual transactions stay in your browser.</span></div><p className="ai-disclaimer">Gemini free-tier content may be used by Google to improve products. Keep AI off for strictly local-only budgeting.</p>{loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your month…</strong><p>Budgetly is asking Gemini for a concise second opinion.</p></div>}{error && <div className="ai-error"><strong>AI is unavailable right now</strong><p>{error}</p><button className="secondary-button" onClick={onRetry}>Try again</button></div>}{result && !loading && <div className="ai-result"><div className="ai-headline"><span className="ai-result-icon"><Sparkles size={17} /></span><div><strong>{result.headline}</strong><small>Informational only — not financial advice</small></div></div><div className="ai-bullets">{result.bullets.map((bullet) => <div key={bullet}><span>•</span><p>{bullet}</p></div>)}</div><div className="ai-next"><strong>One useful next step</strong><p>{result.nextStep}</p></div></div>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close</button>{result && <button className="primary-button" onClick={onRetry}><Sparkles size={16} /> Refresh read</button>}</div></div></div>;
+}
+
+function ShieldCheckIcon() {
+  return <span className="shield-check"><Check size={13} /></span>;
 }
