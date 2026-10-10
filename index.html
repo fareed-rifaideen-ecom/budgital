@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f5f6f1" />
+    <script>
+      (function () {
+        try {
+          var stored = JSON.parse(localStorage.getItem('budgetly-settings-v1') || '{}');
+          var theme = stored.theme === 'dark' || stored.theme === 'light'
+            ? stored.theme
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.dataset.theme = theme;
+        } catch (error) {
+          document.documentElement.dataset.theme = 'light';
+        }
+      })();
+    </script>
     <meta name="description" content="Budgetly is a free private budget app for monthly budgets, expense tracking, CSV import, and optional AI insights without linking a bank account." />
     <meta name="keywords" content="personal budget app, free budget app, private budgeting app, monthly budget planner, expense tracker, CSV budget import, local budget app, AI budget insights" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
@@ -22,13 +35,22 @@
     <script type="application/ld+json">
       {"@context":"https://schema.org","@type":"WebApplication","name":"Budgetly","url":"https://8328-ivf8ohokt0tjlsia836tl-673d8326.sg2.manus.computer/","applicationCategory":"FinanceApplication","operatingSystem":"Web browser","isAccessibleForFree":true,"description":"A private browser-local budget app for monthly budgets, expense tracking, CSV import and optional AI insights.","featureList":["Monthly category budgets","Income and expense tracking","CSV import and export","Spending charts","Dark mode","Optional Gemini AI insights"],"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}
     </script>
+    <script type="application/ld+json">
+      {"@context":"https://schema.org","@type":"FAQPage","mainEntity":[
+        {"@type":"Question","name":"Is Budgetly free to use?","acceptedAnswer":{"@type":"Answer","text":"Yes. Budgetly is a free browser-based budget app. There is no account, no subscription, and no bank connection required."}},
+        {"@type":"Question","name":"Does Budgetly connect to my bank?","acceptedAnswer":{"@type":"Answer","text":"No. Budgetly is local-first, so it never connects to a bank. You log income and expenses manually or import a CSV file, and the working budget stays in your browser."}},
+        {"@type":"Question","name":"What data does the optional AI feature send?","acceptedAnswer":{"@type":"Answer","text":"Only aggregate figures for the selected date range: totals plus category totals and the local insight headlines. Individual transactions, merchant descriptions, and dates stay in your browser."}},
+        {"@type":"Question","name":"Can I set a monthly budget per category?","acceptedAnswer":{"@type":"Answer","text":"Yes. Each expense category can have its own monthly amount, and Budgetly shows how much is left or how far over the plan you are. Multi-month ranges compare several monthly plans against the spending inside the range."}},
+        {"@type":"Question","name":"Can I export or import my data?","acceptedAnswer":{"@type":"Answer","text":"Yes. Budgetly exports your transactions, categories, and budgets as a CSV backup, and imports CSV files from a bank or spreadsheet after validating the columns."}}
+      ]}
+    </script>
   </head>
   <body>
     <div id="root"></div>
     <section class="seo-content" aria-label="About Budgetly">
       <div class="seo-content-inner">
         <p class="seo-kicker">A calmer way to budget</p>
-        <h1>Free private budget app for monthly spending</h1>
+        <h2 class="seo-title">Free private budget app for monthly spending</h2>
         <p>Budgetly helps you log income and expenses, plan a monthly amount for each category, and see what is left. It works in your browser without a bank connection or account, so you can start with manual entries or import a CSV.</p>
         <div class="seo-answer-grid">
           <article><h2>What makes Budgetly different?</h2><p>Budgetly is local-first: your working budget stays in this browser unless you export it or choose to send aggregate totals to the optional Gemini insight feature.</p></article>

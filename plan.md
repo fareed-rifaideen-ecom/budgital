@@ -37,3 +37,22 @@ Budgetly stays a focused, browser-local budget app rather than becoming a bank-a
 - `public/robots.txt`, `public/sitemap.xml`, `public/manus-routes.json` — crawl and route declarations.
 - `docs/competitor-research.md` — competitor gaps and differentiation evidence.
 - `docs/seo-ai-research.md` — verified Google/Gemini/GEO guidance and keyword clusters.
+
+## Iteration 2 — theme, AI conversation, dates, and mobile
+
+### Scope
+Address the reported theme, contrast, AI, date-filtering, and mobile/tablet problems without changing the local-first data model, the CSV contract, or the privacy boundary of the AI proxy.
+
+### Implementation
+- **Theme system.** Replace the three-way theme with two states (`light`, `dark`). `loadTheme` falls back to `window.matchMedia('(prefers-color-scheme: dark)')` when nothing is stored, a small inline script in `index.html` applies `data-theme` before first paint, and the React effect persists the choice and updates `theme-color`. `applyTheme` animates the switch with `document.startViewTransition` and a clip-path circle expanding from the switch position, with a short cross-fade fallback and a `prefers-reduced-motion` opt-out.
+- **Design tokens.** Every light-mode color in `styles.css` was replaced with semantic variables (surfaces, lines, text tiers, accent, hero, solid/on-solid, state colors). The dark palette is defined once on `html[data-theme='dark']`, so components inherit rather than needing per-element overrides. `--solid`/`--on-solid` keep primary buttons readable in both themes, and `--hero-bg`/`--hero-ink` keep the dark hero card dark in dark mode.
+- **AI conversation.** The proxy accepts `mode: 'insight'` for the first read and `mode: 'chat'` for follow-ups, with the same aggregate snapshot plus up to 8 cleaned history turns; replies are plain text. The client keeps an `AiMessage` thread, offers suggested questions, shows a typing indicator, and posts only totals, category totals, and local insight headlines.
+- **Date ranges.** A `DateRange` value (start, end, preset) replaces the single selected month and drives totals, category spend, insights, the trend chart, and the ledger. Presets cover this month, last month, 3 and 6 months, year to date, all time, and custom from/to dates, with previous/next stepping and comparison against the immediately preceding equal-length period. Budget plans are monthly, so `budgetMonths` scales the plan for multi-month ranges and uses the first logged month for all time.
+- **Mobile and tablet.** A bottom tab bar with a center add action replaces the drawer below 900px; tables become card rows on phones; modals and the range picker become bottom sheets; filter fields stack; tablets get a two-column dashboard and a collapsed topbar. Views sync to `location.hash` so the browser back button works.
+
+### Project structure (unchanged plus additions)
+- `src/App.tsx` — data model, range math, insight rules, views, and the new theme switch, date sheet, conversation panel, and tab bar.
+- `src/styles.css` — tokenized base styles plus the theme, animation, AI, range, and responsive layers.
+- `server/gemini.mjs` — aggregate-only validation, guardrails, and the insight/chat modes.
+- `index.html` — crawlable copy, metadata, WebApplication and FAQ structured data, and the pre-paint theme script.
+

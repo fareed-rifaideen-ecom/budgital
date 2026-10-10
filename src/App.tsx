@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowDownLeft,
+  ArrowUpDown,
   ArrowUpRight,
   BarChart3,
   Bot,
   CalendarDays,
+  CalendarRange,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -14,13 +16,13 @@ import {
   FileUp,
   Home,
   Landmark,
-  Menu,
-  Monitor,
   Moon,
   MoreHorizontal,
   Plus,
   Receipt,
+  Send,
   Settings2,
+  SlidersHorizontal,
   Sparkles,
   Sun,
   Tags,
@@ -32,8 +34,12 @@ import {
 
 type TransactionType = 'income' | 'expense';
 type View = 'overview' | 'transactions' | 'budgets' | 'data';
-type Theme = 'system' | 'light' | 'dark';
-type AiResult = { headline: string; bullets: string[]; nextStep: string };
+type Theme = 'light' | 'dark';
+type AiInsight = { headline: string; bullets: string[]; nextStep: string };
+type AiMessage = { id: string; role: 'user' | 'assistant'; text: string };
+type RangePreset = 'thisMonth' | 'lastMonth' | 'last3' | 'last6' | 'ytd' | 'all' | 'custom';
+type DateRange = { start: string; end: string; preset: RangePreset };
+type Totals = { income: number; expenses: number; budget: number; left: number; budgetLeft: number; budgetMonths: number };
 
 type Category = {
   id: string;
@@ -77,13 +83,18 @@ const isoDate = (date = new Date()) => date.toISOString().slice(0, 10);
 const monthKey = (date: string) => date.slice(0, 7);
 const currentMonth = isoDate().slice(0, 7);
 
+function systemTheme(): Theme {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 function loadTheme(): Theme {
   try {
     const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as { theme?: Theme };
-    return stored.theme === 'light' || stored.theme === 'dark' || stored.theme === 'system' ? stored.theme : 'system';
+    if (stored.theme === 'light' || stored.theme === 'dark') return stored.theme;
   } catch {
-    return 'system';
+    // Fall through to the system preference when settings are unavailable.
   }
+  return systemTheme();
 }
 
 const defaultCategories: Category[] = [
@@ -147,6 +158,13 @@ function formatCompactCurrency(value: number) {
   return formatCurrency(value);
 }
 
+const VIEW_IDS: View[] = ['overview', 'transactions', 'budgets', 'data'];
+
+function readViewFromHash(): View {
+  const hash = window.location.hash.replace(/^#\/?/, '') as View;
+  return VIEW_IDS.includes(hash) ? hash : 'overview';
+}
+
 function getCategory(categories: Category[], id: string) {
   return categories.find((category) => category.id === id) ?? { id, name: 'Uncategorized', color: '#9aa9a4', kind: 'both' as const };
 }
@@ -161,43 +179,184 @@ function shiftMonth(month: string, delta: number) {
   return value.toISOString().slice(0, 7);
 }
 
+const pad2 = (value: number) => String(value).padStart(2, '0');
+const localISO = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+const monthLastDay = (month: string) => {
+  const [year, value] = month.split('-').map(Number);
+  return `${month}-${pad2(new Date(year, value, 0).getDate())}`;
+};
+const addDays = (iso: string, delta: number) => {
+  const date = new Date(`${iso}T12:00:00`);
+  date.setDate(date.getDate() + delta);
+  return localISO(date);
+};
+const daySpan = (start: string, end: string) => Math.max(Math.round((new Date(`${end}T12:00:00`).getTime() - new Date(`${start}T12:00:00`).getTime()) / 86400000) + 1, 1);
+
+function buildRange(preset: RangePreset, anchor: string, custom: { start: string; end: string }): DateRange {
+  switch (preset) {
+    case 'lastMonth': {
+      const month = shiftMonth(anchor, -1);
+      return { preset, start: `${month}-01`, end: monthLastDay(month) };
+    }
+    case 'last3':
+      return { preset, start: `${shiftMonth(anchor, -2)}-01`, end: monthLastDay(anchor) };
+    case 'last6':
+      return { preset, start: `${shiftMonth(anchor, -5)}-01`, end: monthLastDay(anchor) };
+    case 'ytd':
+      return { preset, start: `${anchor.slice(0, 4)}-01-01`, end: monthLastDay(anchor) };
+    case 'all':
+      return { preset, start: '1970-01-01', end: '2999-12-31' };
+    case 'custom': {
+      const start = custom.start <= custom.end ? custom.start : custom.end;
+      const end = custom.start <= custom.end ? custom.end : custom.start;
+      return { preset, start, end };
+    }
+    default:
+      return { preset: 'thisMonth', start: `${anchor}-01`, end: monthLastDay(anchor) };
+  }
+}
+
+function allTimeMonths(transactions: Transaction[], range: DateRange) {
+  if (!transactions.length) return 1;
+  const earliest = transactions.reduce((min, item) => (item.date < min ? item.date : min), transactions[0].date).slice(0, 7);
+  const end = range.end.slice(0, 7);
+  return Math.max((Number(end.slice(0, 4)) - Number(earliest.slice(0, 4))) * 12 + (Number(end.slice(5, 7)) - Number(earliest.slice(5, 7))) + 1, 1);
+}
+
+function monthsCovered(range: DateRange) {
+  if (range.preset === 'all') return 12;
+  const start = range.start.slice(0, 7);
+  const end = range.end.slice(0, 7);
+  const months = (Number(end.slice(0, 4)) - Number(start.slice(0, 4))) * 12 + (Number(end.slice(5, 7)) - Number(start.slice(5, 7))) + 1;
+  return Math.max(months, 1);
+}
+
+function previousRange(range: DateRange): DateRange | null {
+  if (range.preset === 'all') return null;
+  if (['thisMonth', 'lastMonth', 'last3', 'last6', 'ytd'].includes(range.preset)) {
+    const months = monthsCovered(range);
+    const endMonth = shiftMonth(range.end.slice(0, 7), -months);
+    const startMonth = shiftMonth(endMonth, -(months - 1));
+    return { preset: 'custom', start: `${startMonth}-01`, end: monthLastDay(endMonth) };
+  }
+  const span = daySpan(range.start, range.end);
+  const end = addDays(range.start, -1);
+  return { preset: 'custom', start: addDays(end, -(span - 1)), end };
+}
+
+function rangeLabel(range: DateRange) {
+  if (range.preset === 'all') return 'All time';
+  if (range.preset === 'ytd') return `${range.start.slice(0, 4)} year to date`;
+  const startMonth = range.start.slice(0, 7);
+  const endMonth = range.end.slice(0, 7);
+  if (startMonth === endMonth) return getMonthLabel(endMonth);
+  const startDay = Number(range.start.slice(8, 10));
+  const endDay = Number(range.end.slice(8, 10));
+  const span = monthsCovered(range);
+  if (range.preset === 'custom' && span === 1) return `${getMonthLabel(endMonth).split(' ')[0]} ${startDay} – ${endDay}`;
+  return `${getMonthLabel(startMonth)} – ${getMonthLabel(endMonth)}`;
+}
+
+const inRange = (date: string, range: DateRange) => date >= range.start && date <= range.end;
+
 export function App() {
   const [data, setData] = useState<BudgetlyData>(loadData);
-  const [view, setView] = useState<View>('overview');
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+  const [view, setView] = useState<View>(readViewFromHash);
+  const [anchor, setAnchor] = useState(currentMonth);
+  const [preset, setPreset] = useState<RangePreset>('thisMonth');
+  const [customRange, setCustomRange] = useState({ start: `${currentMonth}-01`, end: isoDate() });
+  const [showRange, setShowRange] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showImport, setShowImport] = useState(false);
-  const [showMobileNav, setShowMobileNav] = useState(false);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showAi, setShowAi] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [aiInsight, setAiInsight] = useState<AiInsight | null>(null);
+  const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
+  const [aiAsking, setAiAsking] = useState(false);
   const [aiError, setAiError] = useState('');
+  const themeTransition = useRef(false);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
 
   useEffect(() => {
-    const resolved = theme === 'system' ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light') : theme;
-    document.documentElement.dataset.theme = resolved;
-    document.querySelector('meta[name=theme-color]')?.setAttribute('content', resolved === 'dark' ? '#0d1714' : '#f5f6f1');
+    const sync = () => setView(readViewFromHash());
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, []);
+
+  function goTo(next: View) {
+    if (next !== view) window.location.hash = next === 'overview' ? '' : next;
+    setView(next);
+  }
+
+  const range = useMemo(() => buildRange(preset, anchor, customRange), [preset, anchor, customRange]);
+
+  function applyTheme(next: Theme, origin?: { x: number; y: number }) {
+    const root = document.documentElement;
+    const viewDocument = document as Document & { startViewTransition?: (callback: () => void) => { ready: Promise<void> } };
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduceMotion || typeof viewDocument.startViewTransition !== 'function') {
+      root.classList.add('theme-fallback');
+      window.setTimeout(() => root.classList.remove('theme-fallback'), 520);
+      setTheme(next);
+      return;
+    }
+    const x = origin?.x ?? window.innerWidth - 46;
+    const y = origin?.y ?? 34;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    themeTransition.current = true;
+    setTheme(next);
+    const transition = viewDocument.startViewTransition(() => { root.dataset.theme = next; });
+    void transition.ready.then(() => {
+      root.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 640, easing: 'cubic-bezier(.22, 1, .36, 1)', pseudoElement: '::view-transition-new(root)' },
+      );
+    });
+  }
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!themeTransition.current) root.dataset.theme = theme;
+    themeTransition.current = false;
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', theme === 'dark' ? '#0d1714' : '#f5f6f1');
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme }));
   }, [theme]);
 
-  const monthTransactions = useMemo(
-    () => data.transactions.filter((transaction) => monthKey(transaction.date) === selectedMonth),
-    [data.transactions, selectedMonth],
-  );
-  const monthExpenses = monthTransactions.filter((transaction) => transaction.type === 'expense');
-  const monthIncome = monthTransactions.filter((transaction) => transaction.type === 'income');
-  const totals = useMemo(() => {
-    const income = monthIncome.reduce((sum, transaction) => sum + transaction.amount, 0);
-    const expenses = monthExpenses.reduce((sum, transaction) => sum + transaction.amount, 0);
-    const budget = data.budgets.reduce((sum, item) => sum + item.amount, 0);
-    return { income, expenses, budget, left: income - expenses, budgetLeft: budget - expenses };
-  }, [data.budgets, monthExpenses, monthIncome]);
+  useEffect(() => {
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    const sync = () => {
+      try {
+        const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}') as { theme?: Theme };
+        if (stored.theme === 'light' || stored.theme === 'dark') return;
+      } catch {
+        // Ignore unreadable settings and follow the system value.
+      }
+      setTheme(media.matches ? 'dark' : 'light');
+    };
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  }, []);
+
+  const rangeTransactions = useMemo(() => data.transactions.filter((transaction) => inRange(transaction.date, range)), [data.transactions, range]);
+  const rangeExpenses = rangeTransactions.filter((transaction) => transaction.type === 'expense');
+  const rangeIncome = rangeTransactions.filter((transaction) => transaction.type === 'income');
+  const categorySpend = useMemo(() => {
+    const map = new Map<string, number>();
+    rangeExpenses.forEach((transaction) => map.set(transaction.categoryId, (map.get(transaction.categoryId) ?? 0) + transaction.amount));
+    return Array.from(map.entries()).map(([categoryId, amount]) => ({ category: getCategory(data.categories, categoryId), amount })).sort((a, b) => b.amount - a.amount);
+  }, [data.categories, rangeExpenses]);
+  const totals: Totals = useMemo(() => {
+    const income = rangeIncome.reduce((sum, transaction) => sum + transaction.amount, 0);
+    const expenses = rangeExpenses.reduce((sum, transaction) => sum + transaction.amount, 0);
+    const budgetMonths = range.preset === 'all' ? allTimeMonths(data.transactions, range) : monthsCovered(range);
+    const budget = data.budgets.reduce((sum, item) => sum + item.amount, 0) * budgetMonths;
+    return { income, expenses, budget, left: income - expenses, budgetLeft: budget - expenses, budgetMonths };
+  }, [data.budgets, data.transactions, range, rangeExpenses, rangeIncome]);
 
   function mutate(next: BudgetlyData) {
     setData({ ...next, isDemo: false });
@@ -235,28 +394,66 @@ export function App() {
     setShowImport(false);
   }
 
+  function buildSnapshot() {
+    const insights = buildInsights(data, range, totals, categorySpend);
+    return {
+      period: rangeLabel(range),
+      totals: { income: totals.income, expenses: totals.expenses, budget: totals.budget, left: totals.left },
+      categorySpend: categorySpend.map(({ category, amount }) => ({ category: category.name, amount })),
+      localInsights: insights.map((insight) => insight.title),
+    };
+  }
+
+  async function requestAi(body: Record<string, unknown>) {
+    const response = await fetch('/api/gemini/insights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const payload = await response.json() as Record<string, unknown> & { error?: string };
+    if (!response.ok) throw new Error(payload.error || 'The AI service could not respond.');
+    return payload;
+  }
+
   async function runAiInsights() {
     setShowAi(true);
     setAiLoading(true);
     setAiError('');
-    setAiResult(null);
-    const categoryMap = new Map<string, number>();
-    monthExpenses.forEach((transaction) => categoryMap.set(transaction.categoryId, (categoryMap.get(transaction.categoryId) ?? 0) + transaction.amount));
-    const categorySpend = Array.from(categoryMap.entries()).map(([categoryId, amount]) => ({ category: getCategory(data.categories, categoryId).name, amount }));
+    setAiInsight(null);
+    setAiMessages([]);
     try {
-      const response = await fetch('/api/gemini/insights', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: selectedMonth, totals, categorySpend, localInsights: buildInsights(data, selectedMonth, totals, categorySpend.map(({ category, amount }) => ({ category: data.categories.find((item) => item.name === category) ?? { id: category, name: category, color: '#9aa9a4', kind: 'both' as const }, amount }))) }),
-      });
-      const result = await response.json() as AiResult & { error?: string };
-      if (!response.ok) throw new Error(result.error || 'The AI service could not respond.');
-      setAiResult(result);
+      const payload = await requestAi({ mode: 'insight', snapshot: buildSnapshot() });
+      setAiInsight(payload as unknown as AiInsight);
     } catch (error) {
       setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
     } finally {
       setAiLoading(false);
     }
+  }
+
+  async function askAiFollowUp(question: string) {
+    const trimmed = question.trim().slice(0, 400);
+    if (!trimmed || aiAsking) return;
+    const userMessage: AiMessage = { id: makeId(), role: 'user', text: trimmed };
+    const history = [...aiMessages, userMessage].slice(-8);
+    setAiMessages(history);
+    setAiAsking(true);
+    setAiError('');
+    try {
+      const payload = await requestAi({ mode: 'chat', question: trimmed, history: history.map(({ role, text }) => ({ role, text })), snapshot: buildSnapshot() });
+      const answer = typeof payload.answer === 'string' ? payload.answer : '';
+      if (!answer) throw new Error('The AI service returned an empty answer.');
+      setAiMessages((current) => [...current, { id: makeId(), role: 'assistant', text: answer }]);
+    } catch (error) {
+      setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
+    } finally {
+      setAiAsking(false);
+    }
+  }
+
+  function shiftAnchor(delta: number) {
+    setAnchor((current) => shiftMonth(current, delta));
+    if (preset === 'custom' || preset === 'all') setPreset('thisMonth');
   }
 
   function clearData() {
@@ -273,16 +470,15 @@ export function App() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${showMobileNav ? 'sidebar-open' : ''}`}>
+      <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark">B</div>
           <div><div className="brand-name">Budgetly</div><div className="brand-caption">Money, made clear.</div></div>
-          <button className="icon-button sidebar-close" onClick={() => setShowMobileNav(false)} aria-label="Close navigation"><X size={18} /></button>
         </div>
         <nav className="side-nav" aria-label="Main navigation">
           <p className="nav-eyebrow">Workspace</p>
           {nav.map(({ id, label, icon: Icon }) => (
-            <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => { setView(id); setShowMobileNav(false); }}>
+            <button key={id} className={`nav-item ${view === id ? 'active' : ''}`} onClick={() => goTo(id)}>
               <Icon size={18} strokeWidth={view === id ? 2.4 : 1.8} /><span>{label}</span>{id === 'data' && <span className="nav-dot" />}
             </button>
           ))}
@@ -295,58 +491,73 @@ export function App() {
 
       <main className="main-content">
         <header className="topbar">
-          <button className="mobile-menu icon-button" onClick={() => setShowMobileNav(true)} aria-label="Open navigation"><Menu size={21} /></button>
           <div className="crumb"><span>Personal workspace</span><ChevronRight size={15} /><strong>{nav.find((item) => item.id === view)?.label}</strong></div>
           <div className="topbar-actions">
-            <button className="month-picker" onClick={() => setSelectedMonth(selectedMonth === currentMonth ? shiftMonth(selectedMonth, -1) : currentMonth)}><CalendarDays size={16} /><span>{getMonthLabel(selectedMonth)}</span><ChevronDown size={15} /></button>
-            <ThemeToggle theme={theme} onChange={setTheme} />
-            <button className="primary-button small" onClick={() => { setEditingTransaction(null); setShowAdd(true); }}><Plus size={16} /> Add transaction</button>
+            <div className="range-cluster">
+              <div className="range-steps">
+                <button onClick={() => shiftAnchor(-1)} aria-label="Previous period"><ChevronLeft size={17} /></button>
+                <button onClick={() => shiftAnchor(1)} aria-label="Next period"><ChevronRight size={17} /></button>
+              </div>
+              <button className="range-picker" onClick={() => setShowRange(true)} aria-expanded={showRange} aria-haspopup="dialog"><CalendarRange size={16} /><span>{rangeLabel(range)}</span><ChevronDown size={15} className="range-caret" /></button>
+            </div>
+            <div className="topbar-right">
+              <ThemeSwitch theme={theme} onChange={applyTheme} />
+              <button className="primary-button small topbar-add" onClick={() => { setEditingTransaction(null); setShowAdd(true); }} aria-label="Add transaction"><Plus size={16} /><span>Add transaction</span></button>
+            </div>
           </div>
         </header>
 
         <div className="content-wrap">
-          {view === 'overview' && <Overview data={data} selectedMonth={selectedMonth} totals={totals} monthExpenses={monthExpenses} onNavigate={setView} onAdd={() => setShowAdd(true)} onClear={clearData} onAi={runAiInsights} />}
-          {view === 'transactions' && <TransactionsView data={data} month={selectedMonth} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} />}
-          {view === 'budgets' && <BudgetsView data={data} month={selectedMonth} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} />}
+          {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onAi={runAiInsights} onOpenRange={() => setShowRange(true)} />}
+          {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} />}
+          {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
           {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} />}
         </div>
       </main>
 
-      {showAdd && <TransactionModal data={data} month={selectedMonth} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
+      <TabBar view={view} onNavigate={goTo} onAdd={() => { setEditingTransaction(null); setShowAdd(true); }} />
+
+      {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
+      {showAdd && <TransactionModal data={data} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
-      {showAi && <AiInsightsModal loading={aiLoading} result={aiResult} error={aiError} onClose={() => setShowAi(false)} onRetry={runAiInsights} />}
+      {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onAsk={askAiFollowUp} />}
     </div>
   );
 }
 
-function Overview({ data, selectedMonth, totals, monthExpenses, onNavigate, onAdd, onClear, onAi }: { data: BudgetlyData; selectedMonth: string; totals: { income: number; expenses: number; budget: number; left: number; budgetLeft: number }; monthExpenses: Transaction[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void }) {
-  const categorySpend = useMemo(() => {
-    const map = new Map<string, number>();
-    monthExpenses.forEach((transaction) => map.set(transaction.categoryId, (map.get(transaction.categoryId) ?? 0) + transaction.amount));
-    return Array.from(map.entries()).map(([categoryId, amount]) => ({ category: getCategory(data.categories, categoryId), amount })).sort((a, b) => b.amount - a.amount);
-  }, [data.categories, monthExpenses]);
-  const insights = buildInsights(data, selectedMonth, totals, categorySpend);
+function Overview({ data, range, totals, expenses, categorySpend, onNavigate, onAdd, onClear, onAi, onOpenRange }: { data: BudgetlyData; range: DateRange; totals: Totals; expenses: Transaction[]; categorySpend: { category: Category; amount: number }[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void; onOpenRange: () => void }) {
+  const insights = buildInsights(data, range, totals, categorySpend);
   const percentUsed = totals.budget ? Math.min(totals.expenses / totals.budget, 1.2) : 0;
-  const recent = [...monthExpenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
+  const recent = [...expenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
+  const before = previousRange(range);
+  const sumType = (type: TransactionType, window: DateRange | null) => window ? data.transactions.filter((transaction) => transaction.type === type && inRange(transaction.date, window)).reduce((sum, transaction) => sum + transaction.amount, 0) : 0;
+  const change = (current: number, earlier: number) => earlier > 0 ? Math.round((current / earlier - 1) * 100) : null;
+  const expenseChange = change(totals.expenses, sumType('expense', before));
+  const incomeChange = change(totals.income, sumType('income', before));
+  const comparison = before ? `vs ${rangeLabel(before)}` : 'No earlier period yet';
 
   return <>
     <section className="page-intro">
-      <div><div className="kicker"><Sparkles size={14} /> Your monthly pulse</div><h1>Your money, in plain English.</h1><p>Here’s what’s happening with your spending in <strong>{getMonthLabel(selectedMonth)}</strong>.</p></div>
+      <div>
+        <div className="kicker"><Sparkles size={14} /> Your monthly pulse</div>
+        <h1>Your money, in plain English.</h1>
+        <p>Showing <strong>{rangeLabel(range)}</strong>{totals.budgetMonths > 1 ? ` · ${totals.budgetMonths} monthly plans combined` : ''}. <button className="inline-link" onClick={onOpenRange}>Change dates</button></p>
+      </div>
       <div className="intro-actions">{data.isDemo && <button className="ghost-button" onClick={onClear}><Trash2 size={15} /> Clear sample data</button>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgetly AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
     </section>
 
     <section className="hero-grid">
       <div className="hero-card">
         <div className="hero-top"><div><span className="eyebrow light">Available after spending</span><div className="hero-number">{formatCurrency(totals.left)}</div><span className="hero-meta">{totals.left >= 0 ? 'You’re in a comfortable spot.' : 'A little more went out than came in.'}</span></div><div className="hero-orbit" style={{ '--progress': `${Math.min(Math.max(percentUsed, 0), 1) * 360}deg` } as CSSProperties}><div><strong>{Math.round(Math.min(percentUsed, 1) * 100)}%</strong><small>of budget used</small></div></div></div>
-        <div className="hero-bottom"><span>{formatCurrency(totals.expenses)} spent</span><span className="hero-separator">/</span><span>{formatCurrency(totals.budget)} budget</span><span className="hero-bar"><i style={{ width: `${Math.min(percentUsed * 100, 100)}%` }} /></span></div>
+        <div className="hero-bottom"><span>{formatCurrency(totals.expenses)} spent</span><span className="hero-separator">/</span><span>{formatCurrency(totals.budget)} {totals.budgetMonths > 1 ? `plan · ${totals.budgetMonths} mo` : 'budget'}</span><span className="hero-bar"><i style={{ width: `${Math.min(percentUsed * 100, 100)}%` }} /></span></div>
       </div>
-      <div className="stat-card income-card"><div className="stat-icon positive"><ArrowDownLeft size={18} /></div><div className="stat-label">Income <span>this month</span></div><strong>{formatCurrency(totals.income)}</strong><small><span className="positive-text">+8.4%</span> vs last month</small></div>
-      <div className="stat-card expense-card"><div className="stat-icon warm"><ArrowUpRight size={18} /></div><div className="stat-label">Spent <span>this month</span></div><strong>{formatCurrency(totals.expenses)}</strong><small><span className="negative-text">+4.1%</span> vs last month</small></div>
+      <div className="stat-card income-card"><div className="stat-icon positive"><ArrowDownLeft size={18} /></div><div className="stat-label">Income <span>{rangeLabel(range)}</span></div><strong>{formatCurrency(totals.income)}</strong><small>{incomeChange === null ? comparison : <><span className={incomeChange >= 0 ? 'positive-text' : 'negative-text'}>{incomeChange >= 0 ? '+' : '−'}{Math.abs(incomeChange)}%</span> {comparison}</>}</small></div>
+      <div className="stat-card expense-card"><div className="stat-icon warm"><ArrowUpRight size={18} /></div><div className="stat-label">Spent <span>{rangeLabel(range)}</span></div><strong>{formatCurrency(totals.expenses)}</strong><small>{expenseChange === null ? comparison : <><span className={expenseChange <= 0 ? 'positive-text' : 'negative-text'}>{expenseChange >= 0 ? '+' : '−'}{Math.abs(expenseChange)}%</span> {comparison}</>}</small></div>
     </section>
 
     <section className="chart-grid">
       <SpendingDonut data={data} categorySpend={categorySpend} total={totals.expenses} onViewAll={() => onNavigate('budgets')} />
-      <TrendChart data={data} selectedMonth={selectedMonth} />
+      <TrendChart data={data} range={range} />
     </section>
 
     <section className="lower-grid">
@@ -363,50 +574,106 @@ function SpendingDonut({ data, categorySpend, total, onViewAll }: { data: Budget
   return <div className="panel chart-panel donut-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Where it goes</div><h2>Spending by category</h2></div><button className="icon-button" aria-label="Open budgets" onClick={onViewAll}><MoreHorizontal size={19} /></button></div><div className="donut-content"><div className="donut-wrap"><svg viewBox="0 0 180 180" className="donut-chart"><circle cx="90" cy="90" r={radius} fill="none" stroke="#edf0e9" strokeWidth="18" />{categorySpend.map(({ category, amount }) => { const portion = total ? amount / total : 0; const dash = portion * circumference; const segment = <circle key={category.id} cx="90" cy="90" r={radius} fill="none" stroke={category.color} strokeWidth="18" strokeDasharray={`${dash} ${circumference - dash}`} strokeDashoffset={-offset} strokeLinecap="round" transform="rotate(-90 90 90)" />; offset += dash; return segment; })}</svg><div className="donut-center"><strong>{formatCompactCurrency(total)}</strong><span>total spent</span></div></div><div className="legend">{categorySpend.length ? categorySpend.slice(0, 5).map(({ category, amount }) => <div className="legend-item" key={category.id}><span className="legend-swatch" style={{ background: category.color }} /><span>{category.name}</span><strong>{total ? Math.round(amount / total * 100) : 0}%</strong></div>) : <EmptyState title="No spending yet" copy="Your category mix will show up here." />}</div></div></div>;
 }
 
-function TrendChart({ data, selectedMonth }: { data: BudgetlyData; selectedMonth: string }) {
-  const months = Array.from({ length: 6 }, (_, index) => shiftMonth(selectedMonth, index - 5));
+function TrendChart({ data, range }: { data: BudgetlyData; range: DateRange }) {
+  const monthCount = Math.min(Math.max(monthsCovered(range), 3), 12);
+  const endMonth = range.end.slice(0, 7);
+  const months = Array.from({ length: monthCount }, (_, index) => shiftMonth(endMonth, index - (monthCount - 1)));
   const values = months.map((month) => data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + transaction.amount, 0));
   const max = Math.max(...values, 1);
-  return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> monthly spend</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>$0</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === selectedMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
+  return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> last {monthCount} months</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>$0</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === endMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
 }
 
-function buildInsights(data: BudgetlyData, selectedMonth: string, totals: { income: number; expenses: number; budget: number; left: number; budgetLeft: number }, categorySpend: { category: Category; amount: number }[]) {
+function buildInsights(data: BudgetlyData, range: DateRange, totals: Totals, categorySpend: { category: Category; amount: number }[]) {
   const insights: { title: string; copy: string; tone: string; icon: string }[] = [];
-  const budgetMap = new Map(data.budgets.map((budget) => [budget.categoryId, budget.amount]));
+  const months = totals.budgetMonths;
+  const budgetMap = new Map(data.budgets.map((budget) => [budget.categoryId, budget.amount * months]));
   const over = categorySpend.find(({ category, amount }) => (budgetMap.get(category.id) ?? 0) > 0 && amount > (budgetMap.get(category.id) ?? 0));
   if (over) {
     const budget = budgetMap.get(over.category.id) ?? 0;
     const percent = Math.round((over.amount / budget - 1) * 100);
-    insights.push({ title: `${over.category.name} is ${percent}% over budget`, copy: `You’ve spent ${formatCurrency(over.amount)} against a ${formatCurrency(budget)} plan.`, tone: 'warning', icon: '!' });
+    insights.push({ title: `${over.category.name} is ${percent}% over budget`, copy: `You’ve spent ${formatCurrency(over.amount)} against a ${formatCurrency(budget)} plan${months > 1 ? ` for ${months} months` : ''}.`, tone: 'warning', icon: '!' });
   }
-  const previousMonth = shiftMonth(selectedMonth, -1);
-  const previousExpenses = data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === previousMonth).reduce((sum, transaction) => sum + transaction.amount, 0);
-  if (previousExpenses > 0) {
+  const before = previousRange(range);
+  const previousExpenses = before ? data.transactions.filter((transaction) => transaction.type === 'expense' && inRange(transaction.date, before)).reduce((sum, transaction) => sum + transaction.amount, 0) : 0;
+  if (before && previousExpenses > 0) {
     const delta = Math.round((totals.expenses / previousExpenses - 1) * 100);
-    insights.push({ title: `Spending is ${Math.abs(delta)}% ${delta <= 0 ? 'lower' : 'higher'} than last month`, copy: `${formatCurrency(totals.expenses)} this month vs ${formatCurrency(previousExpenses)} in ${getMonthLabel(previousMonth)}.`, tone: delta <= 0 ? 'positive' : 'neutral', icon: delta <= 0 ? '↓' : '↑' });
+    insights.push({ title: `Spending is ${Math.abs(delta)}% ${delta <= 0 ? 'lower' : 'higher'} than ${rangeLabel(before)}`, copy: `${formatCurrency(totals.expenses)} in ${rangeLabel(range)} vs ${formatCurrency(previousExpenses)} in the previous period.`, tone: delta <= 0 ? 'positive' : 'neutral', icon: delta <= 0 ? '↓' : '↑' });
   }
   const largest = categorySpend[0];
-  if (largest) insights.push({ title: `${largest.category.name} is your biggest line item`, copy: `It makes up ${Math.round(largest.amount / Math.max(totals.expenses, 1) * 100)}% of total spending this month.`, tone: 'neutral', icon: '•' });
+  if (largest) insights.push({ title: `${largest.category.name} is your biggest line item`, copy: `It makes up ${Math.round(largest.amount / Math.max(totals.expenses, 1) * 100)}% of spending in ${rangeLabel(range)}.`, tone: 'neutral', icon: '•' });
   if (!insights.length) insights.push({ title: 'You’re ready to build a baseline', copy: 'Log a few transactions and Budgetly will start calling out patterns.', tone: 'positive', icon: '✓' });
-  if (totals.left >= 0 && totals.income > 0) insights.push({ title: `${formatCurrency(totals.left)} is still unallocated`, copy: 'That’s the room you have after income and spending so far.', tone: 'positive', icon: '✓' });
+  if (totals.left >= 0 && totals.income > 0) insights.push({ title: `${formatCurrency(totals.left)} is still unallocated`, copy: 'That’s the room you have after income and spending in this period.', tone: 'positive', icon: '✓' });
   return insights.slice(0, 3);
 }
 
 function TransactionRow({ transaction, category }: { transaction: Transaction; category: Category }) {
-  return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: '#17362e' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</strong></div>;
+  return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</strong></div>;
 }
 
-function TransactionsView({ data, month, onEdit, onDelete, onAdd }: { data: BudgetlyData; month: string; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void }) {
+function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange }: { data: BudgetlyData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void }) {
   const [filter, setFilter] = useState<'all' | TransactionType>('all');
   const [query, setQuery] = useState('');
-  const transactions = data.transactions.filter((transaction) => monthKey(transaction.date) === month && (filter === 'all' || transaction.type === filter) && `${transaction.description} ${getCategory(data.categories, transaction.categoryId).name}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.date.localeCompare(a.date));
-  return <><section className="page-intro compact"><div><div className="kicker"><Receipt size={14} /> Activity ledger</div><h1>Transactions</h1><p>Everything in and out for <strong>{getMonthLabel(month)}</strong>.</p></div><button className="primary-button" onClick={onAdd}><Plus size={17} /> Add transaction</button></section><div className="panel ledger-panel"><div className="ledger-toolbar"><div className="segmented"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>All</button><button className={filter === 'income' ? 'selected' : ''} onClick={() => setFilter('income')}>Income</button><button className={filter === 'expense' ? 'selected' : ''} onClick={() => setFilter('expense')}>Expenses</button></div><input className="search-input" placeholder="Search transactions" value={query} onChange={(event) => setQuery(event.target.value)} /></div><div className="table-wrap"><table><thead><tr><th>Transaction</th><th>Category</th><th>Date</th><th className="align-right">Amount</th><th aria-label="Actions" /></tr></thead><tbody>{transactions.map((transaction) => { const category = getCategory(data.categories, transaction.categoryId); return <tr key={transaction.id}><td><div className="table-transaction"><span className="category-icon small" style={{ background: `${category.color}44` }}><Tags size={14} /></span><strong>{transaction.description || category.name}</strong></div></td><td><span className="category-pill" style={{ '--pill-color': category.color } as CSSProperties}>{category.name}</span></td><td>{fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</td><td className={`align-right amount-cell ${transaction.type === 'income' ? 'positive-text' : ''}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></td></tr>})}</tbody></table>{!transactions.length && <EmptyState title="No transactions found" copy="Try another filter or log a new transaction." />}</div></div></>;
+  const [categoryId, setCategoryId] = useState('all');
+  const [sort, setSort] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
+  const categories = [...data.categories].sort((a, b) => a.name.localeCompare(b.name));
+  const search = query.trim().toLowerCase();
+  const filtered = data.transactions.filter((transaction) => inRange(transaction.date, range)
+    && (filter === 'all' || transaction.type === filter)
+    && (categoryId === 'all' || transaction.categoryId === categoryId)
+    && (!search || `${transaction.description} ${getCategory(data.categories, transaction.categoryId).name} ${transaction.amount}`.toLowerCase().includes(search)));
+  const visible = [...filtered].sort((a, b) => sort === 'highest' ? b.amount - a.amount : sort === 'lowest' ? a.amount - b.amount : sort === 'oldest' ? a.date.localeCompare(b.date) : b.date.localeCompare(a.date));
+  const income = filtered.filter((transaction) => transaction.type === 'income').reduce((sum, transaction) => sum + transaction.amount, 0);
+  const expense = filtered.filter((transaction) => transaction.type === 'expense').reduce((sum, transaction) => sum + transaction.amount, 0);
+  const isCustomRange = range.preset === 'custom' || range.preset === 'all';
+  const from = range.preset === 'all' ? '' : range.start;
+  const to = range.preset === 'all' ? '' : range.end;
+  const resetFilters = () => { setFilter('all'); setQuery(''); setCategoryId('all'); setSort('newest'); onRangeChange('thisMonth'); };
+
+  return <>
+    <section className="page-intro compact">
+      <div><div className="kicker"><Receipt size={14} /> Activity ledger</div><h1>Transactions</h1><p><strong>{rangeLabel(range)}</strong> · {visible.length} {visible.length === 1 ? 'entry' : 'entries'} <button className="inline-link" onClick={onOpenRange}>Change dates</button></p></div>
+      <button className="primary-button" onClick={onAdd}><Plus size={17} /> Add transaction</button>
+    </section>
+    <div className="panel ledger-panel">
+      <div className="ledger-toolbar">
+        <div className="segmented"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>All</button><button className={filter === 'income' ? 'selected' : ''} onClick={() => setFilter('income')}>Income</button><button className={filter === 'expense' ? 'selected' : ''} onClick={() => setFilter('expense')}>Expenses</button></div>
+        <input className="search-input" placeholder="Search transactions" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
+      <div className="filter-row">
+        <label className="filter-field"><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="all">All categories</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label>
+        <label className="filter-field"><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="highest">Highest amount</option><option value="lowest">Lowest amount</option></select></label>
+        <label className="filter-field"><span>From</span><input type="date" value={from} max={to || undefined} onChange={(event) => event.target.value && onRangeChange('custom', { start: event.target.value, end: to || isoDate() })} /></label>
+        <label className="filter-field"><span>To</span><input type="date" value={to} min={from || undefined} onChange={(event) => event.target.value && onRangeChange('custom', { start: from || '1970-01-01', end: event.target.value })} /></label>
+      </div>
+      <div className="ledger-summary">
+        <span><strong>{visible.length}</strong> shown</span>
+        <span>In <strong className="positive-text">{formatCurrency(income)}</strong></span>
+        <span>Out <strong className="expense-amount">{formatCurrency(expense)}</strong></span>
+        <span>Net <strong className={income - expense < 0 ? 'negative-text' : 'positive-text'}>{formatCurrency(income - expense)}</strong></span>
+        {(filter !== 'all' || categoryId !== 'all' || search || isCustomRange) && <button className="text-button" onClick={resetFilters}>Reset filters</button>}
+      </div>
+      <div className="table-wrap"><table className="table-only"><thead><tr><th>Transaction</th><th>Category</th><th>Date</th><th className="align-right">Amount</th><th aria-label="Actions" /></tr></thead><tbody>{visible.map((transaction) => { const category = getCategory(data.categories, transaction.categoryId); return <tr key={transaction.id}><td><div className="table-transaction"><span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span><strong>{transaction.description || category.name}</strong></div></td><td><span className="category-pill" style={{ '--pill-color': category.color } as CSSProperties}>{category.name}</span></td><td>{fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</td><td className={`align-right amount-cell ${transaction.type === 'income' ? 'positive-text' : ''}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></td></tr>; })}</tbody></table></div>
+      <TransactionCards data={data} transactions={visible} onEdit={onEdit} onDelete={onDelete} />
+      {!visible.length && <EmptyState title="No transactions match" copy="Try a wider date range or clear the filters." />}
+    </div>
+  </>;
 }
 
-function BudgetsView({ data, month, onBudgetChange, onAddCategory }: { data: BudgetlyData; month: string; onBudgetChange: (categoryId: string, amount: number) => void; onAddCategory: (name: string, kind: Category['kind']) => Category }) {
+function TransactionCards({ data, transactions, onEdit, onDelete }: { data: BudgetlyData; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
+  return <div className="tx-cards">{transactions.map((transaction) => {
+    const category = getCategory(data.categories, transaction.categoryId);
+    return <div className="tx-card" key={transaction.id}>
+      <span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span>
+      <div className="tx-card-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div>
+      <div className="tx-card-side"><div className={`tx-card-amount ${transaction.type === 'income' ? 'positive-text' : 'expense-amount'}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount)}</div><div className="tx-card-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></div>
+    </div>;
+  })}</div>;
+}
+
+function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { data: BudgetlyData; month: string; onBudgetChange: (categoryId: string, amount: number) => void; onAddCategory: (name: string, kind: Category['kind']) => Category; onShift: (delta: number) => void }) {
   const [newCategory, setNewCategory] = useState('');
   const expenseCategories = data.categories.filter((category) => category.kind !== 'income');
-  return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + transaction.amount, 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
+  return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + transaction.amount, 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
 }
 
 function DataView({ data, onImport, onExport, onClear }: { data: BudgetlyData; onImport: () => void; onExport: () => void; onClear: () => void }) {
@@ -473,14 +740,98 @@ function EmptyState({ title, copy }: { title: string; copy: string }) {
 }
 
 
-function ThemeToggle({ theme, onChange }: { theme: Theme; onChange: (theme: Theme) => void }) {
-  const nextTheme = theme === 'system' ? 'dark' : theme === 'dark' ? 'light' : 'system';
-  const Icon = theme === 'dark' ? Moon : theme === 'light' ? Sun : Monitor;
-  return <button className="theme-toggle" onClick={() => onChange(nextTheme)} aria-label={`Theme: ${theme}. Switch to ${nextTheme}`} title={`Theme: ${theme}`}><Icon size={16} /><span>{theme}</span></button>;
+function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (next: Theme, origin?: { x: number; y: number }) => void }) {
+  const next: Theme = theme === 'dark' ? 'light' : 'dark';
+  return <button
+    type="button"
+    className="theme-switch"
+    data-active={theme}
+    aria-pressed={theme === 'dark'}
+    aria-label={`Switch to ${next} mode`}
+    title={`Switch to ${next} mode`}
+    onClick={(event) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      onChange(next, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+    }}
+  >
+    <span className="theme-sky" />
+    <span className="theme-stars"><i /><i /><i /></span>
+    <span className="theme-switch-icons"><Sun className="theme-icon-sun" /><Moon className="theme-icon-moon" /></span>
+    <span className="theme-thumb">{theme === 'dark' ? <Moon /> : <Sun />}</span>
+  </button>;
 }
 
-function AiInsightsModal({ loading, result, error, onClose, onRetry }: { loading: boolean; result: AiResult | null; error: string; onClose: () => void; onRetry: () => void }) {
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal ai-modal"><div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Optional AI read</div><h2>Make this month clearer</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="ai-privacy"><ShieldCheckIcon /><span>Only month totals, category totals, and existing local insights are sent. Descriptions and individual transactions stay in your browser.</span></div><p className="ai-disclaimer">Gemini free-tier content may be used by Google to improve products. Keep AI off for strictly local-only budgeting.</p>{loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your month…</strong><p>Budgetly is asking Gemini for a concise second opinion.</p></div>}{error && <div className="ai-error"><strong>AI is unavailable right now</strong><p>{error}</p><button className="secondary-button" onClick={onRetry}>Try again</button></div>}{result && !loading && <div className="ai-result"><div className="ai-headline"><span className="ai-result-icon"><Sparkles size={17} /></span><div><strong>{result.headline}</strong><small>Informational only — not financial advice</small></div></div><div className="ai-bullets">{result.bullets.map((bullet) => <div key={bullet}><span>•</span><p>{bullet}</p></div>)}</div><div className="ai-next"><strong>One useful next step</strong><p>{result.nextStep}</p></div></div>}<div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close</button>{result && <button className="primary-button" onClick={onRetry}><Sparkles size={16} /> Refresh read</button>}</div></div></div>;
+function DateRangeSheet({ range, preset, anchor, custom, onSelect, onCustom, onShift, onClose }: { range: DateRange; preset: RangePreset; anchor: string; custom: { start: string; end: string }; onSelect: (preset: RangePreset) => void; onCustom: (custom: { start: string; end: string }) => void; onShift: (delta: number) => void; onClose: () => void }) {
+  const presets: { id: RangePreset; label: string; hint: string }[] = [
+    { id: 'thisMonth', label: 'This month', hint: getMonthLabel(anchor) },
+    { id: 'lastMonth', label: 'Last month', hint: getMonthLabel(shiftMonth(anchor, -1)) },
+    { id: 'last3', label: 'Last 3 months', hint: `${getMonthLabel(shiftMonth(anchor, -2))} – ${getMonthLabel(anchor)}` },
+    { id: 'last6', label: 'Last 6 months', hint: `${getMonthLabel(shiftMonth(anchor, -5))} – ${getMonthLabel(anchor)}` },
+    { id: 'ytd', label: 'Year to date', hint: `${anchor.slice(0, 4)} so far` },
+    { id: 'all', label: 'All time', hint: 'Everything you have logged' },
+  ];
+  return <div className="range-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="range-panel" role="dialog" aria-label="Choose a date range">
+      <div className="modal-heading"><div><div className="panel-kicker"><CalendarRange size={14} /> Date range</div><h2>{rangeLabel(range)}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <div className="range-steps range-steps-wide"><button onClick={() => onShift(-1)} aria-label="Previous period"><ChevronLeft size={17} /> Previous</button><button onClick={() => onShift(1)} aria-label="Next period">Next <ChevronRight size={17} /></button></div>
+      <div className="range-presets">{presets.map((item) => <button key={item.id} className={preset === item.id ? 'selected' : ''} onClick={() => onSelect(item.id)}><span>{item.label}<small>{item.hint}</small></span>{preset === item.id && <Check size={15} />}</button>)}</div>
+      <div className="range-custom">
+        <label><span>From</span><input type="date" value={custom.start} max={custom.end} onChange={(event) => event.target.value && onCustom({ start: event.target.value, end: custom.end })} /></label>
+        <label><span>To</span><input type="date" value={custom.end} min={custom.start} onChange={(event) => event.target.value && onCustom({ start: custom.start, end: event.target.value })} /></label>
+      </div>
+      <p className="range-summary">{preset === 'custom' ? <><strong>Custom range applied.</strong> </> : null}Budget plans are stored per month, so a multi-month range compares each monthly plan against the spending inside the selected dates.</p>
+    </div>
+  </div>;
+}
+
+function TabBar({ view, onNavigate, onAdd }: { view: View; onNavigate: (view: View) => void; onAdd: () => void }) {
+  const tabs: { id: View; label: string; icon: typeof Home }[] = [
+    { id: 'overview', label: 'Overview', icon: Home },
+    { id: 'transactions', label: 'Activity', icon: Receipt },
+    { id: 'budgets', label: 'Budgets', icon: WalletCards },
+    { id: 'data', label: 'Data', icon: FileUp },
+  ];
+  return <nav className="tabbar" aria-label="Primary navigation">
+    {tabs.slice(0, 2).map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? 'active' : ''} onClick={() => onNavigate(id)}><Icon size={19} /><span>{label}</span></button>)}
+    <button className="tabbar-add" onClick={onAdd} aria-label="Add transaction"><Plus size={22} /></button>
+    {tabs.slice(2).map(({ id, label, icon: Icon }) => <button key={id} className={view === id ? 'active' : ''} onClick={() => onNavigate(id)}><Icon size={19} /><span>{label}</span></button>)}
+  </nav>;
+}
+
+function AiConversation({ loading, insight, messages, asking, error, range, onClose, onRetry, onAsk }: { loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; onClose: () => void; onRetry: () => void; onAsk: (question: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const suggestions = ['Why is my biggest category so high?', 'Which category grew fastest?', 'How can I free up $200 next month?'];
+  const submit = (question: string) => {
+    if (!question.trim() || asking) return;
+    setDraft('');
+    onAsk(question);
+  };
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+    <div className="modal ai-modal">
+      <div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Budgetly AI · {rangeLabel(range)}</div><h2>Ask about this period</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
+      <div className="ai-privacy"><ShieldCheckIcon /><span>Only totals, category totals, and your local insights are sent. Individual transactions and descriptions stay in this browser.</span></div>
+      <p className="ai-disclaimer">Free-tier Gemini content may be used by Google to improve products. Keep AI off for strictly local-only budgeting.</p>
+      {loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your period…</strong><p>Budgetly is asking Gemini for a concise second opinion.</p></div>}
+      {!loading && <>
+        {(insight || messages.length > 0) && <div className="ai-thread">
+          {insight && <div className="ai-bubble intro">
+            <div className="ai-headline"><span className="ai-result-icon"><Sparkles size={16} /></span><div><strong>{insight.headline}</strong><small>Informational only — not financial advice</small></div></div>
+            {insight.bullets.length > 0 && <ul className="ai-points">{insight.bullets.map((bullet) => <li key={bullet}><span>{bullet}</span></li>)}</ul>}
+            {insight.nextStep && <div className="ai-next"><strong>One useful next step</strong><p>{insight.nextStep}</p></div>}
+          </div>}
+          {messages.map((message) => <div key={message.id} className={`ai-bubble ${message.role === 'user' ? 'user' : 'bot'}`}>{message.text}</div>)}
+          {asking && <div className="ai-typing"><i /><i /><i /></div>}
+        </div>}
+        {error && <div className="ai-error"><strong>AI is unavailable right now</strong><p>{error}</p><button className="secondary-button" onClick={onRetry}>Try again</button></div>}
+        {insight && <div className="ai-suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => submit(suggestion)}>{suggestion}</button>)}</div>}
+        <div className="ai-composer">
+          <input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(draft); }} placeholder="Ask a follow-up question…" aria-label="Ask a follow-up question" />
+          <button onClick={() => submit(draft)} disabled={!draft.trim() || asking} aria-label="Send question"><Send size={17} /></button>
+        </div>
+      </>}
+      <div className="modal-actions"><button className="secondary-button" onClick={onClose}>Close</button>{insight && <button className="primary-button" onClick={onRetry}><Sparkles size={16} /> Refresh read</button>}</div>
+    </div>
+  </div>;
 }
 
 function ShieldCheckIcon() {
