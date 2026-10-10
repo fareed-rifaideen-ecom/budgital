@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowDownLeft,
+  ArrowUp,
   ArrowUpDown,
   ArrowUpRight,
   BarChart3,
+  BookOpen,
   Bot,
   CalendarDays,
   CalendarRange,
@@ -34,11 +36,12 @@ import {
 } from 'lucide-react';
 
 type TransactionType = 'income' | 'expense';
-type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY';
+type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY' | 'AED' | 'SAR' | 'PHP';
 const currencyOptions: { code: CurrencyCode; label: string; symbol: string }[] = [
   { code: 'USD', label: 'US Dollar', symbol: '$' }, { code: 'EUR', label: 'Euro', symbol: '€' }, { code: 'GBP', label: 'British Pound', symbol: '£' },
   { code: 'LKR', label: 'Sri Lankan Rupee', symbol: 'Rs' }, { code: 'INR', label: 'Indian Rupee', symbol: '₹' }, { code: 'AUD', label: 'Australian Dollar', symbol: 'A$' },
   { code: 'CAD', label: 'Canadian Dollar', symbol: 'C$' }, { code: 'JPY', label: 'Japanese Yen', symbol: '¥' },
+  { code: 'AED', label: 'UAE Dirham', symbol: 'د.إ' }, { code: 'SAR', label: 'Saudi Riyal', symbol: '﷼' }, { code: 'PHP', label: 'Philippine Peso', symbol: '₱' },
 ];
 function currencySymbol(code: CurrencyCode) { return currencyOptions.find((item) => item.code === code)?.symbol ?? code; }
 type View = 'overview' | 'transactions' | 'budgets' | 'data';
@@ -85,6 +88,8 @@ type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 't
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
+const LIGHT_MARK = '/manus-storage/async-images/guwKSoPjBUZwsI5QiSwHyO/image-1.webp';
+const DARK_MARK = '/manus-storage/async-images/guwKSoPjBUZwsI5QiSwHyO/image-2.webp';
 const AI_DAILY_LIMIT = 12;
 const AI_USAGE_KEY = 'budgital-ai-usage-v1';
 function usageToday() {
@@ -341,6 +346,7 @@ export function App() {
   const [showAdd, setShowAdd] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showTutorial, setShowTutorial] = useState(false);
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showAi, setShowAi] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -647,7 +653,7 @@ export function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark">B</div>
+          <div className="brand-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="" /></div>
           <div><div className="brand-name">Budgital</div><div className="brand-caption">Money, made clear.</div></div>
         </div>
         <nav className="side-nav" aria-label="Main navigation">
@@ -659,7 +665,7 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
+          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><button className="sidebar-guide" onClick={() => setShowTutorial(true)}><BookOpen size={14} /> How Budgital works</button><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
           <button className="profile-button"><span className="avatar">JD</span><span className="profile-copy"><strong>Jordan Doe</strong><small>Personal account</small></span><MoreHorizontal size={17} /></button>
         </div>
       </aside>
@@ -676,7 +682,7 @@ export function App() {
               <button className="range-picker" onClick={() => setShowRange(true)} aria-expanded={showRange} aria-haspopup="dialog"><CalendarRange size={16} /><span>{rangeLabel(range)}</span><ChevronDown size={15} className="range-caret" /></button>
             </div>
             <div className="topbar-right">
-              <ThemeSwitch theme={theme} onChange={applyTheme} />
+              <button className="ghost-button tutorial-trigger" onClick={() => setShowTutorial(true)} aria-label="Open how Budgital works"><BookOpen size={15} /><span>How it works</span></button><ThemeSwitch theme={theme} onChange={applyTheme} />
               <button className="primary-button small topbar-add" onClick={() => { setEditingTransaction(null); setShowAdd(true); }} aria-label="Add transaction"><Plus size={16} /><span>Add transaction</span></button>
             </div>
           </div>
@@ -692,9 +698,13 @@ export function App() {
 
       <TabBar view={view} onNavigate={goTo} onAdd={() => { setEditingTransaction(null); setShowAdd(true); }} />
 
+      {!showAi && <button className="ai-fab" onClick={runAiInsights} aria-label="Open Budgital AI chatbot"><Bot size={19} /><span>Ask AI</span></button>}
+      <BackToTop />
+
       {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
       {showAdd && <TransactionModal data={data} baseCurrency={data.baseCurrency ?? 'USD'} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
+      {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
@@ -1033,7 +1043,7 @@ function AiConversation({ loading, insight, messages, asking, error, range, fail
     setDraft('');
     onAsk(question);
   };
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+  return <div className="modal-backdrop ai-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="modal ai-modal">
       <div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Budgital AI · {rangeLabel(range)}</div><h2>Ask about this period</h2><small className="ai-quota">{aiRemaining} AI {aiRemaining === 1 ? 'request' : 'requests'} left today</small></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
       <div className="ai-privacy"><ShieldCheckIcon /><span>Only totals, category totals, and your local insights are sent. Individual transactions and descriptions stay in this browser.</span></div>
@@ -1066,5 +1076,28 @@ function ShieldCheckIcon() {
 }
 
 function SplashScreen({ theme }: { theme: Theme }) {
-  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo">B</div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
+  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="" /></div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
+}
+
+function BackToTop() {
+  const [visible, setVisible] = useState(false);
+  useEffect(() => {
+    const sync = () => setVisible(window.scrollY > 520);
+    window.addEventListener('scroll', sync, { passive: true });
+    sync();
+    return () => window.removeEventListener('scroll', sync);
+  }, []);
+  if (!visible) return null;
+  return <button className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Back to top"><ArrowUp size={17} /><span>Top</span></button>;
+}
+
+function TutorialModal({ onClose }: { onClose: () => void }) {
+  const steps = [
+    { icon: Plus, title: 'Start with one clear month', copy: 'Use Add transaction for income or spending. Pick a category, enter the date, and keep the description short enough to scan later.' },
+    { icon: WalletCards, title: 'Give categories a number', copy: 'Open Budgets and set realistic monthly amounts. The dashboard shows what is left and calls out over-budget categories without judgment.' },
+    { icon: CalendarRange, title: 'Change the window', copy: 'Use the date picker for this month, longer comparisons, year to date, all time, or a custom range. The charts and ledger follow the same selection.' },
+    { icon: Download, title: 'Keep a portable copy', copy: 'Use Import / export to bring in a CSV, export a full backup, choose a base currency, or clear starter data safely away from the dashboard.' },
+    { icon: Bot, title: 'Ask only when useful', copy: 'Budgital AI is optional. It receives aggregate totals and category totals, supports follow-up questions, and stays rate-limited with a clear data boundary.' },
+  ];
+  return <div className="modal-backdrop tutorial-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div className="modal-heading"><div><div className="panel-kicker"><BookOpen size={14} /> A calm first run</div><h2 id="tutorial-title">How to use Budgital</h2><p className="tutorial-subtitle">There is no commitment and no bank connection required. Follow the loop once, then make it yours.</p></div><button className="icon-button" onClick={onClose} aria-label="Close tutorial"><X size={19} /></button></div><div className="tutorial-steps">{steps.map(({ icon: Icon, title, copy }, index) => <div className="tutorial-step" key={title}><span className="tutorial-number">{String(index + 1).padStart(2, '0')}</span><span className="tutorial-icon"><Icon size={17} /></span><div><strong>{title}</strong><p>{copy}</p></div></div>)}</div><div className="tutorial-footer"><span><ShieldCheckIcon /> Your working data stays in this browser.</span><button className="primary-button" onClick={onClose}>Sounds good</button></div></section></div>;
 }

@@ -41,3 +41,16 @@
 - **Harden AI usage:** failed AI requests must release the browser allowance; the server must ignore spoofable forwarding headers and enforce a configurable project-wide daily ceiling.
 - **Serve discoverable guide pages correctly:** trailing-slash learning URLs must return their static guide HTML, while `/app` must be noindex at the HTTP layer.
 - **Improve responsive/performance behavior:** do not mount both transaction representations at once; native controls must follow dark mode; the landing header must remain usable at narrow phone widths.
+
+## Iteration 4 outcomes
+
+- **Extend currency support:** Add AED, SAR, and PHP to transaction entry, base-currency selection, import/export validation, formatting, and Gemini FX requests using the codes AED, SAR, and PHP.
+- **Make AI a floating chatbot:** Keep the aggregate-only insight and follow-up flow, but open it from a persistent right-bottom floating control; make the panel usable on desktop, tablet, and phone without obscuring the bottom tab bar.
+- **Add responsive landing theme access:** Keep the Light/Dark toggle available on mobile landing pages as well as desktop, with system preference still used only before the first explicit choice.
+- **Use a distinctive two-theme logo:** Create and use minimalist Budgital marks optimized for both light and dark surfaces; keep the mark legible at small app-icon sizes and avoid generated wordmark text inside the asset.
+- **Add scroll utility and motion:** Provide a back-to-top control on both landing and app pages; make it compact, accessible, and positioned safely across desktop, tablet, and phone layouts. Add reduced-motion-safe scroll reveal triggers to the landing page.
+- **Make the author interactive:** Clicking “Lumina Metrics by FMR” or the author mark must open a brief author card explaining Fareed M. Rifaideen’s motivation, free/community intent, website, GitHub, LinkedIn, and Buy Me a Coffee links with recognizable icons.
+- **Noticeable builder support CTA:** Animate the Support the Builder action gently and add a smooth hover treatment without making the CTA obstructive or misleading.
+- **Expand answer-first FAQs:** Add visible questions about free use, bank-free budgeting, local storage, multi-currency, FX estimates, exports, AI privacy, and starting a first month; keep FAQ structured data synchronized with the visible answers.
+- **Add a practical app tutorial:** Provide a short in-app workflow guide covering transactions, category budgets, date ranges, CSV portability, AI boundaries, and the free/no-commitment model; make it reachable on mobile and desktop.
+- **Keep SEO/AEO/GEO evidence current:** Record the new competitor, people-first content, AI privacy, currency-code, and FAQ research with source URLs in the research report.

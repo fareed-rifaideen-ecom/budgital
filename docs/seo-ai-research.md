@@ -60,3 +60,27 @@ Google’s API-key guidance says to treat the key like a password, never check i
 [5]: https://ai.google.dev/gemini-api/docs/pricing "Gemini Developer API pricing — Google AI for Developers"
 [6]: https://ai.google.dev/gemini-api/docs/rate-limits "Rate limits — Gemini API"
 [7]: https://ai.google.dev/gemini-api/docs/api-key "Using Gemini API keys — Google AI for Developers"
+
+## New FAQ and citation research — October 2026
+
+The expanded FAQ set now targets questions that users and answer engines can quote directly: whether the app is free, whether budgeting works without bank linking, where data is stored, how optional AI handles privacy, how multi-currency conversion works, how to export a backup, and how to start a first month. These questions are useful because they connect product intent with concrete jobs-to-be-done instead of adding generic SEO copy.
+
+A bank-free competitor page from Koody frames manual entry, statement imports, category review, cash and side-hustle flexibility, exports, and privacy as the main reasons people avoid bank linking.[8] Goodbudget differentiates through envelope budgeting, household sharing, mobile availability, and educational content.[9] Budgital should not copy either message. Its sharper angle is “free, no commitment, browser-local, CSV-portable, multi-currency, with aggregate-only AI when requested.” That combination gives the landing page a clear answer to “Why this instead of a bank-linked or method-specific budget app?”
+
+Google’s current people-first guidance says helpful content should offer original value, identify who created it, explain how it was made when relevant, and avoid producing many search-first pages without a real audience need.[10] The FAQ implementation therefore keeps the questions visible, concise, and tied to the working product. It avoids claims about guaranteed rankings or special AI markup. The landing page also exposes the author and the product’s first-hand origin story, which supports the “Who” and “Why” signals Google asks creators to make clear.
+
+For AI citation readiness, the product pages now use short answer-first statements, explicit boundaries, named authorship, descriptive internal links, and FAQ structured data that matches visible content. A U.S. Bank financial-education page provides a useful safety baseline: AI can help organize a budget and explore scenarios, but it should not receive account numbers, passwords, PINs, full addresses, or full bank statements, and it should not replace secure financial tools or personalized advice.[11] Budgital’s aggregate-only proxy and visible “informational estimate” caveat follow the same conservative pattern.
+
+The currency list now uses ISO-style three-letter codes for AED (UAE dirham), SAR (Saudi riyal), and PHP (Philippine peso), alongside the existing currencies. ISO explains that ISO 4217 uses internationally recognized alphabetic and numeric codes to reduce ambiguity in currency representation.[12] Gemini exchange rates remain estimates; the app must not present them as live quotes or financial advice.
+
+### FAQ topics to keep measuring
+
+Track impressions and clicks for “free budget app,” “budget app without bank account,” “private expense tracker,” “budget app with CSV import,” “multi-currency budget app,” “AI spending insights privacy,” “how to make a monthly budget,” “why am I over budget,” and “50/30/20 vs zero-based budget.” Treat these as hypotheses rather than volume claims. Search Console and real user questions should decide which FAQ or guide pages deserve expansion.
+
+## New references
+
+[8]: https://koody.com/blog/budgeting-app-without-bank-linking "Koody — Budgeting app without bank linking"
+[9]: https://goodbudget.com/ "Goodbudget — envelope budgeting app"
+[10]: https://developers.google.com/search/docs/fundamentals/creating-helpful-content "Creating helpful, reliable, people-first content — Google Search Central"
+[11]: https://www.usbank.com/financial-education/save/use-ai-for-budgeting.html "How to use AI for budgeting without oversharing — U.S. Bank"
+[12]: https://www.iso.org/iso-4217-currency-codes.html "ISO 4217 currency codes — ISO"

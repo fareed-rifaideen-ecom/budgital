@@ -92,3 +92,9 @@ Address the reported theme, contrast, AI, date-filtering, and mobile/tablet prob
 - Changing the base currency now requests Gemini estimates, converts budgets and legacy/base transactions, and preserves foreign transactions with new base rates. User-entered FX rates are retained.
 - Browser AI usage is refundable when a request fails; the server ignores spoofable forwarding headers and adds a configurable project-wide daily ceiling (`GEMINI_DAILY_PROJECT_LIMIT`, default 120) in addition to the local 12-request UX limit.
 - Desktop and compact transaction renderers are mutually exclusive in the DOM, native controls follow the active color scheme, and the landing header reflows at very narrow phone widths.
+
+## Iteration 4 — floating AI, richer onboarding, and brand interaction
+
+The app now adds AED, SAR, and PHP using three-letter currency codes. The AI experience is presented as a floating right-bottom chatbot so users can ask for the first read and follow-up questions without leaving the workspace. The landing page uses the generated light/dark Budgital mark assets, mobile theme access, scroll-triggered reveal motion, a back-to-top control, an author detail card, social/support links, and a concise expanded FAQ set grounded in the new research.
+
+The app adds an approachable “How Budgital works” tutorial reachable from the sidebar and mobile topbar. Its first-impression copy makes the free, no-commitment, no-bank-linking position clear without presenting it as a discount message. The main dashboard remains focused on budgeting rather than showing a risky clear-data action.
