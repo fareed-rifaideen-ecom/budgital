@@ -98,3 +98,9 @@ Address the reported theme, contrast, AI, date-filtering, and mobile/tablet prob
 The app now adds AED, SAR, and PHP using three-letter currency codes. The AI experience is presented as a floating right-bottom chatbot so users can ask for the first read and follow-up questions without leaving the workspace. The landing page uses the generated light/dark Budgital mark assets, mobile theme access, scroll-triggered reveal motion, a back-to-top control, an author detail card, social/support links, and a concise expanded FAQ set grounded in the new research.
 
 The app adds an approachable “How Budgital works” tutorial reachable from the sidebar and mobile topbar. Its first-impression copy makes the free, no-commitment, no-bank-linking position clear without presenting it as a discount message. The main dashboard remains focused on budgeting rather than showing a risky clear-data action.
+
+## Iteration 5 — trust surface, resilient branding, and motion
+
+The logo now uses local public SVG fallbacks for light and dark themes so the UI does not depend on asynchronous managed-image delivery. The landing header becomes a centered glass pill after the user scrolls, while the app topbar compresses into a translucent glass bar. The landing page now includes CSS-rendered app screenshots/mockups, reversible IntersectionObserver reveal motion, richer hover/active states, a local-first inquiry/feedback/suggestion form, and legal access.
+
+The app now gates first use behind a local terms acceptance screen. Terms, license, disclaimer, and no-liability language is accessible again from the app. A local feedback form is available on both surfaces, and desktop-only panel motion is applied through a media-query class so phones remain calm and performant.

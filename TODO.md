@@ -54,3 +54,12 @@
 - **Expand answer-first FAQs:** Add visible questions about free use, bank-free budgeting, local storage, multi-currency, FX estimates, exports, AI privacy, and starting a first month; keep FAQ structured data synchronized with the visible answers.
 - **Add a practical app tutorial:** Provide a short in-app workflow guide covering transactions, category budgets, date ranges, CSV portability, AI boundaries, and the free/no-commitment model; make it reachable on mobile and desktop.
 - **Keep SEO/AEO/GEO evidence current:** Record the new competitor, people-first content, AI privacy, currency-code, and FAQ research with source URLs in the research report.
+
+## Iteration 5 outcomes
+
+- **Reliable logo visibility:** Serve local light and dark Budgital SVG marks from `public/` and use them in the landing page, app sidebar, splash screen, consent screen, and author card.
+- **Interactive landing motion:** Make scroll reveals reversible when scrolling down and back up; add smooth scrolling, click feedback, hover lift, card mockup interaction, reduced-motion handling, and a floating glass pill header after scrolling.
+- **App glass header and desktop motion:** Compress the app header into a transparent/glass state after scrolling and add extra panel hover/breathe motion only on desktop widths.
+- **Landing app imagery:** Add multiple responsive visual mockups showing the desktop dashboard, mobile view, trend chart, and insight surface without blocking page speed on external images.
+- **Feedback forms:** Add inquiry, feedback, and suggestion forms on both landing and app surfaces. Keep the first implementation local-first with browser storage and clear copy that notes it is not transmitted to a server.
+- **Terms and first-use consent:** Add terms of use, license, disclaimer, and creator no-liability language to both surfaces. Require explicit checkbox agreement before the app workspace becomes usable, and persist the acceptance locally.

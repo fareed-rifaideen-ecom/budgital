@@ -16,15 +16,19 @@ import {
   CircleDollarSign,
   Coffee,
   Download,
+  FileText,
   FileUp,
   Home,
   Landmark,
   Moon,
+  MessageSquare,
   MoreHorizontal,
   Plus,
   Receipt,
   Send,
+  Scale,
   Settings2,
+  ShieldAlert,
   SlidersHorizontal,
   Sparkles,
   Sun,
@@ -88,8 +92,9 @@ type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 't
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
-const LIGHT_MARK = '/manus-storage/async-images/guwKSoPjBUZwsI5QiSwHyO/image-1.webp';
-const DARK_MARK = '/manus-storage/async-images/guwKSoPjBUZwsI5QiSwHyO/image-2.webp';
+const LIGHT_MARK = '/budgital-mark-light.svg';
+const DARK_MARK = '/budgital-mark-dark.svg';
+const TERMS_KEY = 'budgital-terms-v1';
 const AI_DAILY_LIMIT = 12;
 const AI_USAGE_KEY = 'budgital-ai-usage-v1';
 function usageToday() {
@@ -347,6 +352,13 @@ export function App() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showTutorial, setShowTutorial] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [showLegal, setShowLegal] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem(TERMS_KEY) === 'accepted');
+  const [feedbackSaved, setFeedbackSaved] = useState(false);
+  const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
+  const [topbarScrolled, setTopbarScrolled] = useState(false);
+  const desktopMotion = useMediaQuery('(min-width: 1100px)');
   const [theme, setTheme] = useState<Theme>(loadTheme);
   const [showAi, setShowAi] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
@@ -368,6 +380,7 @@ export function App() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
   useEffect(() => { const timer = window.setTimeout(() => setSplashVisible(false), 720); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const sync = () => setTopbarScrolled(window.scrollY > 28); window.addEventListener('scroll', sync, { passive: true }); sync(); return () => window.removeEventListener('scroll', sync); }, []);
 
   useEffect(() => {
     const sync = () => setView(readViewFromHash());
@@ -642,6 +655,7 @@ export function App() {
   }
 
   if (splashVisible) return <SplashScreen theme={theme} />;
+  if (!termsAccepted) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },
     { id: 'transactions' as const, label: 'Transactions', icon: Receipt },
@@ -650,7 +664,7 @@ export function App() {
   ];
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${desktopMotion ? 'desktop-motion' : ''}`}>
       <aside className="sidebar">
         <div className="brand-lockup">
           <div className="brand-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="" /></div>
@@ -665,13 +679,13 @@ export function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><button className="sidebar-guide" onClick={() => setShowTutorial(true)}><BookOpen size={14} /> How Budgital works</button><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
+          <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><button className="sidebar-guide" onClick={() => setShowTutorial(true)}><BookOpen size={14} /> How Budgital works</button><button className="sidebar-guide" onClick={() => setShowFeedback(true)}><MessageSquare size={14} /> Inquiry / feedback</button><button className="sidebar-guide" onClick={() => setShowLegal(true)}><FileText size={14} /> Terms & disclaimer</button><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
           <button className="profile-button"><span className="avatar">JD</span><span className="profile-copy"><strong>Jordan Doe</strong><small>Personal account</small></span><MoreHorizontal size={17} /></button>
         </div>
       </aside>
 
       <main className="main-content">
-        <header className="topbar">
+        <header className={`topbar ${topbarScrolled ? 'is-scrolled' : ''}`}>
           <div className="crumb"><span>Personal workspace</span><ChevronRight size={15} /><strong>{nav.find((item) => item.id === view)?.label}</strong></div>
           <div className="topbar-actions">
             <div className="range-cluster">
@@ -682,7 +696,7 @@ export function App() {
               <button className="range-picker" onClick={() => setShowRange(true)} aria-expanded={showRange} aria-haspopup="dialog"><CalendarRange size={16} /><span>{rangeLabel(range)}</span><ChevronDown size={15} className="range-caret" /></button>
             </div>
             <div className="topbar-right">
-              <button className="ghost-button tutorial-trigger" onClick={() => setShowTutorial(true)} aria-label="Open how Budgital works"><BookOpen size={15} /><span>How it works</span></button><ThemeSwitch theme={theme} onChange={applyTheme} />
+              <button className="ghost-button tutorial-trigger" onClick={() => setShowTutorial(true)} aria-label="Open how Budgital works"><BookOpen size={15} /><span>How it works</span></button><button className="ghost-button mobile-utility" onClick={() => setShowFeedback(true)} aria-label="Open feedback form"><MessageSquare size={15} /><span>Feedback</span></button><button className="ghost-button mobile-utility" onClick={() => setShowLegal(true)} aria-label="Open terms and disclaimer"><FileText size={15} /><span>Terms</span></button><ThemeSwitch theme={theme} onChange={applyTheme} />
               <button className="primary-button small topbar-add" onClick={() => { setEditingTransaction(null); setShowAdd(true); }} aria-label="Add transaction"><Plus size={16} /><span>Add transaction</span></button>
             </div>
           </div>
@@ -705,6 +719,8 @@ export function App() {
       {showAdd && <TransactionModal data={data} baseCurrency={data.baseCurrency ?? 'USD'} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
+      {showFeedback && <AppFeedbackModal feedback={feedback} setFeedback={setFeedback} saved={feedbackSaved} onSaved={() => setFeedbackSaved(true)} onClose={() => { setShowFeedback(false); setFeedbackSaved(false); }} />}
+      {showLegal && <AppLegalModal onClose={() => setShowLegal(false)} />}
       {showAi && <AiConversation loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
@@ -1100,4 +1116,18 @@ function TutorialModal({ onClose }: { onClose: () => void }) {
     { icon: Bot, title: 'Ask only when useful', copy: 'Budgital AI is optional. It receives aggregate totals and category totals, supports follow-up questions, and stays rate-limited with a clear data boundary.' },
   ];
   return <div className="modal-backdrop tutorial-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div className="modal-heading"><div><div className="panel-kicker"><BookOpen size={14} /> A calm first run</div><h2 id="tutorial-title">How to use Budgital</h2><p className="tutorial-subtitle">There is no commitment and no bank connection required. Follow the loop once, then make it yours.</p></div><button className="icon-button" onClick={onClose} aria-label="Close tutorial"><X size={19} /></button></div><div className="tutorial-steps">{steps.map(({ icon: Icon, title, copy }, index) => <div className="tutorial-step" key={title}><span className="tutorial-number">{String(index + 1).padStart(2, '0')}</span><span className="tutorial-icon"><Icon size={17} /></span><div><strong>{title}</strong><p>{copy}</p></div></div>)}</div><div className="tutorial-footer"><span><ShieldCheckIcon /> Your working data stays in this browser.</span><button className="primary-button" onClick={onClose}>Sounds good</button></div></section></div>;
+}
+
+
+function TermsGate({ theme, onAccept }: { theme: Theme; onAccept: () => void }) {
+  const [checked, setChecked] = useState(false);
+  return <div className={`terms-gate ${theme === 'dark' ? 'splash-dark' : ''}`}><div className="terms-card"><div className="terms-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="Budgital" /></div><div className="panel-kicker"><Scale size={14} /> Before you begin</div><h1>Budgeting, with clear boundaries.</h1><p>Budgital is a free personal planning tool. Your working budget stays in this browser, and optional AI responses and exchange rates are estimates—not financial advice.</p><div className="terms-summary"><span><ShieldCheckIcon /> Free to use. No bank connection required.</span><span><ShieldAlert size={14} /> No responsibility or liability is accepted for decisions, data loss, interruptions, or financial outcomes.</span></div><label className="terms-check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I have read and agree to the Terms, License, Disclaimer, and no-liability notice.</span></label><button className="primary-button" disabled={!checked} onClick={onAccept}>Agree & open Budgital <ArrowUpRight size={16} /></button><small>By continuing, you agree to use Budgital for personal planning and to verify important information independently.</small></div></div>;
+}
+
+function AppFeedbackModal({ feedback, setFeedback, saved, onSaved, onClose }: { feedback: { kind: string; email: string; message: string }; setFeedback: (next: { kind: string; email: string; message: string }) => void; saved: boolean; onSaved: () => void; onClose: () => void }) {
+  return <div className="modal-backdrop public-form-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="public-form-modal" role="dialog" aria-modal="true" aria-labelledby="app-feedback-title"><button className="icon-button modal-close" onClick={onClose} aria-label="Close feedback form"><X size={18} /></button><div className="panel-kicker"><MessageSquare size={14} /> A note for the builder</div><h2 id="app-feedback-title">Inquiry, feedback, or suggestion</h2><p className="form-note">This form is local-first. Your note is saved in this browser and is not sent to a server.</p>{saved ? <div className="form-success"><Check size={18} /><strong>Saved locally.</strong><span>Thanks — your note is ready to revisit from this browser.</span></div> : <form onSubmit={(event) => { event.preventDefault(); localStorage.setItem('budgital-feedback-v1', JSON.stringify({ ...feedback, createdAt: new Date().toISOString() })); onSaved(); }}><label>Type<select value={feedback.kind} onChange={(event) => setFeedback({ ...feedback, kind: event.target.value })}><option>Feedback</option><option>Inquiry</option><option>Suggestion</option></select></label><label>Your email <span className="optional">optional</span><input type="email" value={feedback.email} onChange={(event) => setFeedback({ ...feedback, email: event.target.value })} placeholder="you@example.com" /></label><label>Your note<textarea required minLength={5} value={feedback.message} onChange={(event) => setFeedback({ ...feedback, message: event.target.value })} placeholder="What would make Budgital more useful?" rows={5} /></label><button className="primary-button" type="submit"><Check size={16} /> Save note locally</button></form>}</section></div>;
+}
+
+function AppLegalModal({ onClose }: { onClose: () => void }) {
+  return <div className="modal-backdrop public-form-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="public-form-modal legal-modal" role="dialog" aria-modal="true" aria-labelledby="app-legal-title"><button className="icon-button modal-close" onClick={onClose} aria-label="Close terms"><X size={18} /></button><div className="panel-kicker"><Scale size={14} /> Clear boundaries</div><h2 id="app-legal-title">Terms, license & disclaimer</h2><p><strong>By using Budgital, you agree</strong> to use it as a personal planning tool and to review your own data and decisions.</p><h3>Terms of use</h3><p>Budgital is provided for personal budgeting and educational use. Do not use it as a substitute for a bank, accountant, lawyer, or licensed financial adviser.</p><h3>License</h3><p>The interface and original content are made available by Lumina Metrics by FMR for free personal use. Please do not resell, misrepresent, or redistribute the product as your own.</p><h3>Disclaimer and no liability</h3><p>Budgital and its creator, Fareed M. Rifaideen, make no warranty about accuracy, availability, exchange-rate estimates, or financial outcomes. To the maximum extent permitted by law, the creator is not responsible or liable for losses, decisions, data loss, or interruptions arising from use of the app.</p><p className="legal-footnote"><ShieldAlert size={14} /> AI responses and exchange rates are estimates, not financial advice. Verify important information independently.</p><button className="primary-button" onClick={onClose}>I understand</button></section></div>;
 }
