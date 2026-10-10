@@ -63,3 +63,12 @@
 - **Landing app imagery:** Add multiple responsive visual mockups showing the desktop dashboard, mobile view, trend chart, and insight surface without blocking page speed on external images.
 - **Feedback forms:** Add inquiry, feedback, and suggestion forms on both landing and app surfaces. Keep the first implementation local-first with browser storage and clear copy that notes it is not transmitted to a server.
 - **Terms and first-use consent:** Add terms of use, license, disclaimer, and creator no-liability language to both surfaces. Require explicit checkbox agreement before the app workspace becomes usable, and persist the acceptance locally.
+
+## Iteration 6 outcomes
+
+- **Balanced landing composition:** Constrain the app showcase and Help shape Budgital card to readable max widths, remove stretched grid behavior, and preserve stable light/dark contrast.
+- **Real app previews:** Replace decorative mockup cards with live responsive previews from the actual `/app` interface. Keep top-level app consent intact; allow only iframe preview mode to bypass the consent gate.
+- **Scroll choreography:** Add direction-aware scroll tokens, an app-related orbit motion, reversible reveal cards, and smooth up/down transitions with reduced-motion support.
+- **Transparent pill:** Increase landing header transparency and preserve readable borders, blur, and contrast in both themes.
+- **Currency clarity:** Use clear ISO currency letters for currencies whose symbols render inconsistently in category totals and compact chart labels.
+- **Brand refresh:** Generate and insert a new distinctive light/dark Budgital mark with reliable local fallbacks.

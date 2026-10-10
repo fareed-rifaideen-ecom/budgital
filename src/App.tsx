@@ -43,9 +43,9 @@ type TransactionType = 'income' | 'expense';
 type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY' | 'AED' | 'SAR' | 'PHP';
 const currencyOptions: { code: CurrencyCode; label: string; symbol: string }[] = [
   { code: 'USD', label: 'US Dollar', symbol: '$' }, { code: 'EUR', label: 'Euro', symbol: '€' }, { code: 'GBP', label: 'British Pound', symbol: '£' },
-  { code: 'LKR', label: 'Sri Lankan Rupee', symbol: 'Rs' }, { code: 'INR', label: 'Indian Rupee', symbol: '₹' }, { code: 'AUD', label: 'Australian Dollar', symbol: 'A$' },
+  { code: 'LKR', label: 'Sri Lankan Rupee', symbol: 'LKR' }, { code: 'INR', label: 'Indian Rupee', symbol: '₹' }, { code: 'AUD', label: 'Australian Dollar', symbol: 'A$' },
   { code: 'CAD', label: 'Canadian Dollar', symbol: 'C$' }, { code: 'JPY', label: 'Japanese Yen', symbol: '¥' },
-  { code: 'AED', label: 'UAE Dirham', symbol: 'د.إ' }, { code: 'SAR', label: 'Saudi Riyal', symbol: '﷼' }, { code: 'PHP', label: 'Philippine Peso', symbol: '₱' },
+  { code: 'AED', label: 'UAE Dirham', symbol: 'AED' }, { code: 'SAR', label: 'Saudi Riyal', symbol: 'SAR' }, { code: 'PHP', label: 'Philippine Peso', symbol: '₱' },
 ];
 function currencySymbol(code: CurrencyCode) { return currencyOptions.find((item) => item.code === code)?.symbol ?? code; }
 type View = 'overview' | 'transactions' | 'budgets' | 'data';
@@ -92,8 +92,10 @@ type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 't
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
-const LIGHT_MARK = '/budgital-mark-light.svg';
-const DARK_MARK = '/budgital-mark-dark.svg';
+const LIGHT_MARK = '/manus-storage/async-images/42W02Z4A8bTo9GNAeewP8E/image-1.webp';
+const DARK_MARK = '/manus-storage/async-images/42W02Z4A8bTo9GNAeewP8E/image-2.webp';
+const LIGHT_FALLBACK = '/budgital-mark-light.svg';
+const DARK_FALLBACK = '/budgital-mark-dark.svg';
 const TERMS_KEY = 'budgital-terms-v1';
 const AI_DAILY_LIMIT = 12;
 const AI_USAGE_KEY = 'budgital-ai-usage-v1';
@@ -354,7 +356,8 @@ export function App() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
-  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem(TERMS_KEY) === 'accepted');
+  const previewMode = new URLSearchParams(window.location.search).get('preview') === '1' && window.self !== window.top;
+  const [termsAccepted, setTermsAccepted] = useState(() => previewMode || localStorage.getItem(TERMS_KEY) === 'accepted');
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
   const [topbarScrolled, setTopbarScrolled] = useState(false);
@@ -655,7 +658,7 @@ export function App() {
   }
 
   if (splashVisible) return <SplashScreen theme={theme} />;
-  if (!termsAccepted) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
+  if (!termsAccepted && !previewMode) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },
     { id: 'transactions' as const, label: 'Transactions', icon: Receipt },
@@ -667,7 +670,7 @@ export function App() {
     <div className={`app-shell ${desktopMotion ? 'desktop-motion' : ''}`}>
       <aside className="sidebar">
         <div className="brand-lockup">
-          <div className="brand-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="" /></div>
+          <div className="brand-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></div>
           <div><div className="brand-name">Budgital</div><div className="brand-caption">Money, made clear.</div></div>
         </div>
         <nav className="side-nav" aria-label="Main navigation">
@@ -1092,7 +1095,7 @@ function ShieldCheckIcon() {
 }
 
 function SplashScreen({ theme }: { theme: Theme }) {
-  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="" /></div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
+  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
 }
 
 function BackToTop() {
@@ -1121,7 +1124,7 @@ function TutorialModal({ onClose }: { onClose: () => void }) {
 
 function TermsGate({ theme, onAccept }: { theme: Theme; onAccept: () => void }) {
   const [checked, setChecked] = useState(false);
-  return <div className={`terms-gate ${theme === 'dark' ? 'splash-dark' : ''}`}><div className="terms-card"><div className="terms-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} alt="Budgital" /></div><div className="panel-kicker"><Scale size={14} /> Before you begin</div><h1>Budgeting, with clear boundaries.</h1><p>Budgital is a free personal planning tool. Your working budget stays in this browser, and optional AI responses and exchange rates are estimates—not financial advice.</p><div className="terms-summary"><span><ShieldCheckIcon /> Free to use. No bank connection required.</span><span><ShieldAlert size={14} /> No responsibility or liability is accepted for decisions, data loss, interruptions, or financial outcomes.</span></div><label className="terms-check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I have read and agree to the Terms, License, Disclaimer, and no-liability notice.</span></label><button className="primary-button" disabled={!checked} onClick={onAccept}>Agree & open Budgital <ArrowUpRight size={16} /></button><small>By continuing, you agree to use Budgital for personal planning and to verify important information independently.</small></div></div>;
+  return <div className={`terms-gate ${theme === 'dark' ? 'splash-dark' : ''}`}><div className="terms-card"><div className="terms-mark"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="Budgital" /></div><div className="panel-kicker"><Scale size={14} /> Before you begin</div><h1>Budgeting, with clear boundaries.</h1><p>Budgital is a free personal planning tool. Your working budget stays in this browser, and optional AI responses and exchange rates are estimates—not financial advice.</p><div className="terms-summary"><span><ShieldCheckIcon /> Free to use. No bank connection required.</span><span><ShieldAlert size={14} /> No responsibility or liability is accepted for decisions, data loss, interruptions, or financial outcomes.</span></div><label className="terms-check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} /><span>I have read and agree to the Terms, License, Disclaimer, and no-liability notice.</span></label><button className="primary-button" disabled={!checked} onClick={onAccept}>Agree & open Budgital <ArrowUpRight size={16} /></button><small>By continuing, you agree to use Budgital for personal planning and to verify important information independently.</small></div></div>;
 }
 
 function AppFeedbackModal({ feedback, setFeedback, saved, onSaved, onClose }: { feedback: { kind: string; email: string; message: string }; setFeedback: (next: { kind: string; email: string; message: string }) => void; saved: boolean; onSaved: () => void; onClose: () => void }) {
