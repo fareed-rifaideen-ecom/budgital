@@ -709,7 +709,7 @@ export function App() {
         </header>
 
         <div className="content-wrap">
-          {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onAi={runAiInsights} onOpenRange={() => setShowRange(true)} />}
+          {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onOpenRange={() => setShowRange(true)} />}
           {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} />}
           {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
           {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} baseCurrency={data.baseCurrency ?? 'USD'} onBaseCurrencyChange={handleBaseCurrencyChange} onRefreshRates={refreshExchangeRates} fxMessage={fxMessage} />}
@@ -732,7 +732,7 @@ export function App() {
   );
 }
 
-function Overview({ data, range, totals, expenses, categorySpend, onNavigate, onAdd, onClear, onAi, onOpenRange }: { data: BudgitalData; range: DateRange; totals: Totals; expenses: Transaction[]; categorySpend: { category: Category; amount: number }[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onAi: () => void; onOpenRange: () => void }) {
+function Overview({ data, range, totals, expenses, categorySpend, onNavigate, onAdd, onClear, onOpenRange }: { data: BudgitalData; range: DateRange; totals: Totals; expenses: Transaction[]; categorySpend: { category: Category; amount: number }[]; onNavigate: (view: View) => void; onAdd: () => void; onClear: () => void; onOpenRange: () => void }) {
   const insights = buildInsights(data, range, totals, categorySpend);
   const percentUsed = totals.budget ? Math.min(totals.expenses / totals.budget, 1.2) : 0;
   const recent = [...expenses].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 4);
@@ -751,7 +751,7 @@ function Overview({ data, range, totals, expenses, categorySpend, onNavigate, on
         <h1>Your money, in plain English.</h1>
         <p>Showing <strong>{rangeLabel(range)}</strong>{totals.budgetMonths > 1.02 ? ` · ${formatMonthCount(totals.budgetMonths)} months of plans combined` : ''}. <button className="inline-link" onClick={onOpenRange}>Change dates</button></p>
       </div>
-      <div className="intro-actions">{data.isDemo && <span className="sample-badge"><Sparkles size={13} /> Starter view · edit in Data</span>}<button className="ai-button" onClick={onAi}><Bot size={16} /> Ask Budgital AI</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
+      <div className="intro-actions">{data.isDemo && <span className="sample-badge"><Sparkles size={13} /> Starter view · edit in Data</span>}<button className="primary-button" onClick={onAdd}><Plus size={17} /> Log a transaction</button></div>
     </section>
 
     <section className="hero-grid">
