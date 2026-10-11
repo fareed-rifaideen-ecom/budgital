@@ -72,3 +72,11 @@
 - **Transparent pill:** Increase landing header transparency and preserve readable borders, blur, and contrast in both themes.
 - **Currency clarity:** Use clear ISO currency letters for currencies whose symbols render inconsistently in category totals and compact chart labels.
 - **Brand refresh:** Generate and insert a new distinctive light/dark Budgital mark with reliable local fallbacks.
+
+## Iteration 7 outcomes
+
+- **Splash animation:** Add an animated Budgital logo and a creative loading animation to the splash screen on both the landing page and the app, without adding a network request or delaying first paint.
+- **Remove Scroll-triggered clarity tile:** Delete that showcase tile from the landing page.
+- **Static real screenshots:** Replace embedded live app previews with static screenshots captured from the real app, and remove the iframe preview bypass from the app route.
+- **Trust signals:** Generate and add photographs of people who look relieved and in control, with an honest illustrative-photography note.
+- **GSAP ScrollTrigger:** Implement the referenced GSAP guide on the landing page with a persistent Bud mascot that follows the scroll narrative between section anchors and reverses when scrolling up, including mobile and reduced-motion profiles.

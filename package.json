@@ -11,15 +11,16 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "typescript": "latest",
+    "gsap": "^3.15.0",
+    "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "lucide-react": "latest"
+    "typescript": "latest",
+    "vite": "latest"
   },
   "devDependencies": {
+    "@types/node": "latest",
     "@types/react": "latest",
-    "@types/react-dom": "latest",
-    "@types/node": "latest"
+    "@types/react-dom": "latest"
   }
 }

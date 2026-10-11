@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { SplashScreen } from './SplashScreen';
 import {
   ArrowDownLeft,
   ArrowUp,
@@ -356,8 +357,7 @@ export function App() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
-  const previewMode = new URLSearchParams(window.location.search).get('preview') === '1' && window.self !== window.top;
-  const [termsAccepted, setTermsAccepted] = useState(() => previewMode || localStorage.getItem(TERMS_KEY) === 'accepted');
+  const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem(TERMS_KEY) === 'accepted');
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
   const [topbarScrolled, setTopbarScrolled] = useState(false);
@@ -372,6 +372,7 @@ export function App() {
   const [aiFailedQuestion, setAiFailedQuestion] = useState('');
   const [aiUsage, setAiUsage] = useState(usageToday);
   const [splashVisible, setSplashVisible] = useState(true);
+  const finishSplash = useCallback(() => setSplashVisible(false), []);
   const themeTransition = useRef(false);
 
   useEffect(() => {
@@ -382,7 +383,7 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
-  useEffect(() => { const timer = window.setTimeout(() => setSplashVisible(false), 720); return () => window.clearTimeout(timer); }, []);
+  useEffect(() => { const timer = window.setTimeout(() => setSplashVisible(false), 1250); return () => window.clearTimeout(timer); }, []);
   useEffect(() => { const sync = () => setTopbarScrolled(window.scrollY > 28); window.addEventListener('scroll', sync, { passive: true }); sync(); return () => window.removeEventListener('scroll', sync); }, []);
 
   useEffect(() => {
@@ -657,8 +658,8 @@ export function App() {
     mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD' });
   }
 
-  if (splashVisible) return <SplashScreen theme={theme} />;
-  if (!termsAccepted && !previewMode) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
+  if (splashVisible) return <SplashScreen theme={theme} onFinish={finishSplash} duration={1250} />;
+  if (!termsAccepted) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },
     { id: 'transactions' as const, label: 'Transactions', icon: Receipt },
@@ -1094,10 +1095,6 @@ function ShieldCheckIcon() {
   return <span className="shield-check"><Check size={13} /></span>;
 }
 
-function SplashScreen({ theme }: { theme: Theme }) {
-  return <div className={`splash-screen ${theme === 'dark' ? 'splash-dark' : ''}`} role="status" aria-label="Loading Budgital"><div className="splash-orbit splash-orbit-one" /><div className="splash-orbit splash-orbit-two" /><div className="splash-logo"><img src={theme === 'dark' ? DARK_MARK : LIGHT_MARK} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></div><div className="splash-wordmark"><strong>Budgital</strong><span>Money, made clear.</span></div><div className="splash-author">Lumina Metrics by FMR<br /><small>Created by Fareed M. Rifaideen</small></div></div>;
-}
-
 function BackToTop() {
   const [visible, setVisible] = useState(false);
   useEffect(() => {
@@ -1120,7 +1117,6 @@ function TutorialModal({ onClose }: { onClose: () => void }) {
   ];
   return <div className="modal-backdrop tutorial-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal tutorial-modal" role="dialog" aria-modal="true" aria-labelledby="tutorial-title"><div className="modal-heading"><div><div className="panel-kicker"><BookOpen size={14} /> A calm first run</div><h2 id="tutorial-title">How to use Budgital</h2><p className="tutorial-subtitle">There is no commitment and no bank connection required. Follow the loop once, then make it yours.</p></div><button className="icon-button" onClick={onClose} aria-label="Close tutorial"><X size={19} /></button></div><div className="tutorial-steps">{steps.map(({ icon: Icon, title, copy }, index) => <div className="tutorial-step" key={title}><span className="tutorial-number">{String(index + 1).padStart(2, '0')}</span><span className="tutorial-icon"><Icon size={17} /></span><div><strong>{title}</strong><p>{copy}</p></div></div>)}</div><div className="tutorial-footer"><span><ShieldCheckIcon /> Your working data stays in this browser.</span><button className="primary-button" onClick={onClose}>Sounds good</button></div></section></div>;
 }
-
 
 function TermsGate({ theme, onAccept }: { theme: Theme; onAccept: () => void }) {
   const [checked, setChecked] = useState(false);
