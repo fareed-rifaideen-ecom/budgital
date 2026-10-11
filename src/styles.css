@@ -1002,3 +1002,19 @@ html[data-theme='light'] .bud-mascot, html[data-theme='dark'] .bud-mascot { mix-
   .topbar-right .theme-switch { flex-basis: 58px; width: 58px; }
   .topbar-add { flex-basis: 36px; width: 36px; }
 }
+
+/* Unified boot handoff and dimension-safe mobile theme switch */
+.theme-switch { --thumb-travel: 40px; }
+.theme-switch[data-active='dark'] .theme-thumb { transform: translate3d(var(--thumb-travel), 0, 0) rotate(180deg); }
+@media (max-width: 900px) {
+  .topbar-right .theme-switch { --thumb-travel: 32px; width: 68px; height: 36px; padding: 3px; }
+  .topbar-right .theme-switch[data-active='dark'] .theme-thumb { transform: translate3d(var(--thumb-travel), 0, 0) rotate(180deg); }
+}
+@media (max-width: 560px) {
+  .topbar-right .theme-switch { --thumb-travel: 28px; width: 62px; height: 34px; padding: 3px; }
+  .topbar-right .theme-switch[data-active='dark'] .theme-thumb { transform: translate3d(var(--thumb-travel), 0, 0) rotate(180deg); }
+}
+@media (max-width: 380px) {
+  .topbar-right .theme-switch { --thumb-travel: 24px; width: 58px; height: 34px; }
+  .topbar-right .theme-switch[data-active='dark'] .theme-thumb { transform: translate3d(var(--thumb-travel), 0, 0) rotate(180deg); }
+}

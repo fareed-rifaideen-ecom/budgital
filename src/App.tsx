@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { SplashScreen } from './SplashScreen';
 import {
   ArrowDownLeft,
   ArrowUp,
@@ -373,8 +372,6 @@ export function App() {
   const [aiError, setAiError] = useState('');
   const [aiFailedQuestion, setAiFailedQuestion] = useState('');
   const [aiUsage, setAiUsage] = useState(usageToday);
-  const [splashVisible, setSplashVisible] = useState(true);
-  const finishSplash = useCallback(() => setSplashVisible(false), []);
   const themeTransition = useRef(false);
 
   useEffect(() => {
@@ -385,7 +382,6 @@ export function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
   }, [data]);
-  useEffect(() => { const timer = window.setTimeout(() => setSplashVisible(false), 1250); return () => window.clearTimeout(timer); }, []);
   useEffect(() => { const sync = () => setTopbarScrolled(window.scrollY > 28); window.addEventListener('scroll', sync, { passive: true }); sync(); return () => window.removeEventListener('scroll', sync); }, []);
 
   useEffect(() => {
@@ -660,7 +656,6 @@ export function App() {
     mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD' });
   }
 
-  if (splashVisible) return <SplashScreen theme={theme} onFinish={finishSplash} duration={1250} />;
   if (!termsAccepted) return <TermsGate theme={theme} onAccept={() => { localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },

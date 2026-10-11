@@ -18,6 +18,22 @@
         }
       })();
     </script>
+    <style>
+      html, body { margin: 0; min-height: 100%; background: #0d1714; }
+      .boot-screen { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 9px; position: relative; overflow: hidden; background: #0d1714; color: #f4f7f1; font: 500 16px/1.35 Inter, ui-sans-serif, system-ui, sans-serif; text-align: center; }
+      .boot-screen strong { font-size: 30px; letter-spacing: -.055em; }
+      .boot-screen span { color: #9aaea5; font-size: 13px; }
+      .boot-screen small { position: absolute; bottom: 28px; color: #91a39b; font-size: 11px; }
+      .boot-tile { width: 68px; height: 68px; display: grid; place-items: center; border-radius: 21px; background: linear-gradient(135deg,#c8ee68,#a9df3d); color: #12251d; font-size: 36px; font-weight: 800; box-shadow: 0 18px 45px rgba(200,238,104,.2); animation: boot-pulse 1.7s ease-in-out infinite; }
+      .boot-screen i { width: 110px; height: 3px; border-radius: 99px; background: linear-gradient(90deg,transparent,#c8ee68,transparent); animation: boot-load 1.2s ease-in-out infinite; }
+      .boot-orbit { position: absolute; border: 1px solid rgba(200,238,104,.22); border-radius: 50%; pointer-events: none; animation: boot-spin 7s linear infinite; }
+      .boot-orbit-one { width: 260px; height: 260px; }.boot-orbit-two { width: 430px; height: 430px; border-style: dashed; animation-direction: reverse; }
+      @keyframes boot-pulse { 50% { transform: translateY(-4px) scale(1.04); } }
+      @keyframes boot-load { 50% { opacity: .45; transform: scaleX(.55); } }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-color-scheme: light) { html[data-theme="light"] body, html[data-theme="light"] .boot-screen { background: #f5f6f1; color: #12251d; } html[data-theme="light"] .boot-screen span, html[data-theme="light"] .boot-screen small { color: #667870; } }
+      @media (prefers-reduced-motion: reduce) { .boot-screen *, .boot-screen::before { animation: none !important; } }
+    </style>
     <meta name="description" content="Budgital is a private, browser-first personal budget app for tracking income, expenses, category budgets, insights, and portable CSV backups." />
     <meta name="keywords" content="Budgital, private budget app, personal budget app, monthly budget planner, expense tracker, local budget app, CSV budget import, AI budget insights" />
     <meta name="robots" content="index,follow,max-image-preview:large" />
@@ -36,7 +52,7 @@
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Budgital","applicationCategory":"FinanceApplication","operatingSystem":"Web browser","isAccessibleForFree":true,"description":"A private browser-local budget app for monthly budgets, expense tracking, CSV import, and optional aggregate-only AI insights.","author":{"@type":"Person","name":"Fareed M. Rifaideen","url":"https://fareed-rifaideen.netlify.app/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   </head>
   <body>
-    <div id="root"><main class="seo-fallback"><p>Browser-first personal budgeting by Lumina Metrics by FMR.</p><h1>Budgital — a calmer way to budget</h1><p>Track income, expenses, monthly category budgets, CSV backups, and optional aggregate-only AI insights. Your budget stays in this browser.</p><p><a href="/app">Open Budgital</a></p></main></div>
+    <div id="root"><div class="boot-screen" role="status" aria-label="Loading Budgital"><div class="boot-orbit boot-orbit-one"></div><div class="boot-orbit boot-orbit-two"></div><div class="boot-tile">B</div><strong>Budgital</strong><span>Money, made clear.</span><i></i><small>Lumina Metrics by FMR · Created by Fareed M. Rifaideen</small></div></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

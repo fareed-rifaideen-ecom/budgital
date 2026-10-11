@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { BudScroll } from './BudScroll';
-import { SplashScreen } from './SplashScreen';
 import { ArrowRight, ArrowUp, BarChart3, Check, ChevronDown, Coffee, Code2, Globe2, BriefcaseBusiness, FileText, MessageSquare, Moon, Scale, ShieldAlert, ShieldCheck, Sparkles, Sun, WalletCards, X, Zap } from 'lucide-react';
 
 type LandingTheme = 'light' | 'dark';
@@ -41,10 +40,6 @@ export function LandingPage() {
   const [legalOpen, setLegalOpen] = useState(false);
   const [feedbackSaved, setFeedbackSaved] = useState(false);
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
-  const [showSplash, setShowSplash] = useState(() => {
-    try { return sessionStorage.getItem('budgital-landing-splash') !== 'seen'; } catch { return true; }
-  });
-  const finishSplash = useCallback(() => { try { sessionStorage.setItem('budgital-landing-splash', 'seen'); } catch { /* ignore */ } setShowSplash(false); }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -70,7 +65,6 @@ export function LandingPage() {
   const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   return <div className="landing-page"><span className="scroll-matter" aria-hidden="true" /><BudScroll />
-    {showSplash && <SplashScreen theme={theme} onFinish={finishSplash} />}
     <header className={`landing-nav ${scrolled ? 'is-scrolled' : ''}`}>
       <a className="landing-brand" href="/" aria-label="Budgital home"><span className="brand-mark"><img src={mark} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></span><span><strong>Budgital</strong><small>Money, made clear.</small></span></a>
       <nav className="landing-links" aria-label="Landing page navigation"><a href="#difference">Why Budgital</a><a href="#privacy">Privacy</a><a href="#faq">FAQ</a><button onClick={() => setFeedbackOpen(true)}>Feedback</button></nav>
