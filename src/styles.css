@@ -961,3 +961,23 @@ html[data-theme='light'] .bud-mascot, html[data-theme='dark'] .bud-mascot { mix-
   .donut-panel .donut-content { grid-template-columns: 112px minmax(0, 1fr); gap: 10px; }
   .donut-panel .donut-wrap { width: 112px; }
 }
+
+/* Mobile app header correction: never collapse the scrolled two-row header */
+@media (max-width: 900px) {
+  .main-content { min-width: 0; }
+  .topbar,
+  .topbar.is-scrolled {
+    height: auto !important;
+    min-height: 0;
+    padding: 12px 14px 10px;
+    overflow: visible;
+  }
+  .topbar .crumb { display: flex; align-items: center; min-height: 24px; margin-bottom: 10px; }
+  .topbar .crumb strong { display: block; font-size: 14px; }
+  .topbar-actions { min-height: 40px; }
+}
+@media (max-width: 560px) {
+  .topbar,
+  .topbar.is-scrolled { padding: 11px 12px 10px; }
+  .topbar-actions { margin-inline: -2px; padding-inline: 2px; }
+}
