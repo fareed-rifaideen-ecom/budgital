@@ -797,3 +797,68 @@ html[data-scroll-direction='up'] .bud-mascot { transform: rotate(-5deg); transit
 @media (prefers-reduced-motion: reduce) {
   .bud-rail { display: none; }
 }
+
+/* Iteration 9: scroll-scrubbed mascot video pinned to the right edge */
+.bud-rail {
+  position: fixed;
+  top: 50%;
+  right: 22px;
+  bottom: auto;
+  left: auto;
+  z-index: 3;
+  --bud-w: 300px;
+  --bud-h: 169px;
+  width: var(--bud-w);
+  height: var(--bud-h);
+  margin-top: calc(var(--bud-h) / -2);
+  pointer-events: none;
+  contain: none;
+  will-change: transform;
+}
+.bud-mascot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  object-fit: contain;
+  background: transparent;
+  transform: none;
+  user-select: none;
+}
+html[data-scroll-direction='down'] .bud-mascot,
+html[data-scroll-direction='up'] .bud-mascot { transform: none; }
+/* The clip is shot on white, so the theme removes that background instead of
+   showing a white box on the page. */
+html[data-theme='light'] .bud-mascot { mix-blend-mode: multiply; filter: none; }
+html[data-theme='dark'] .bud-mascot { mix-blend-mode: screen; filter: invert(1) hue-rotate(180deg) saturate(1.06) contrast(1.02); }
+.bud-mascot-static { mix-blend-mode: normal; filter: none; }
+
+@media (max-width: 1180px) {
+  .bud-rail { --bud-w: 250px; --bud-h: 141px; right: 16px; }
+}
+@media (max-width: 900px) {
+  .bud-rail { --bud-w: 186px; --bud-h: 105px; right: 10px; }
+}
+@media (max-width: 560px) {
+  .bud-rail { --bud-w: 148px; --bud-h: 83px; right: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bud-rail { display: block; }
+}
+
+/* Iteration 9b: blend on the fixed layer itself, drift on an inner element.
+   A blended child of a transformed ancestor only blends inside that ancestor,
+   so the theme blend must live on the outermost fixed layer. */
+.bud-rail { will-change: auto; contain: none; }
+.bud-rail.is-live { will-change: transform; }
+.bud-rail-drift { width: 100%; height: 100%; will-change: transform; }
+html[data-theme='light'] .bud-rail.is-live { mix-blend-mode: multiply; filter: none; }
+html[data-theme='dark'] .bud-rail.is-live { mix-blend-mode: screen; filter: invert(1) hue-rotate(180deg) saturate(1.06) contrast(1.02); }
+.bud-rail.is-static, .bud-rail.is-static .bud-rail-drift { mix-blend-mode: normal; filter: none; }
+html[data-theme='light'] .bud-mascot, html[data-theme='dark'] .bud-mascot { mix-blend-mode: normal; filter: none; }
+
+/* Iteration 9c: softer footprint on the right edge */
+.bud-rail { --bud-w: 262px; --bud-h: 147px; right: 16px; opacity: .97; }
+@media (max-width: 1180px) { .bud-rail { --bud-w: 224px; --bud-h: 126px; right: 12px; } }
+@media (max-width: 900px) { .bud-rail { --bud-w: 172px; --bud-h: 97px; right: 8px; opacity: .94; } }
+@media (max-width: 560px) { .bud-rail { --bud-w: 140px; --bud-h: 79px; right: 6px; opacity: .92; } }

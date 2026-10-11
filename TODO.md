@@ -87,3 +87,10 @@
 - **Gradual CTA approach:** Move the mascot gradually toward the call to action of each section as the page scrolls, and reverse the journey when scrolling up.
 - **Screenshot section fix:** Remove the stretched caption blocks so each screenshot card sizes to its own content and the gallery reads evenly.
 - **Trust photo delivery:** Serve the generated trust photographs from the project itself so they render on the preview and published site.
+
+## Iteration 9 outcomes
+
+- **Video mascot:** Use the uploaded mascot video for the scroll trigger instead of the mascot image.
+- **Fixed right placement:** Keep the video on the right side of the screen and only move it a little up and down while scrolling.
+- **Scroll-driven playback:** Start the clip at the beginning of the page and play it smoothly with the scroll through to the end of the page, reversing on scroll-up.
+- **Theme-safe rendering:** Remove the video's white background so the mascot sits cleanly on both light and dark surfaces, with a static transparent fallback for reduced-motion visitors.
