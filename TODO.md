@@ -94,3 +94,10 @@
 - **Fixed right placement:** Keep the video on the right side of the screen and only move it a little up and down while scrolling.
 - **Scroll-driven playback:** Start the clip at the beginning of the page and play it smoothly with the scroll through to the end of the page, reversing on scroll-up.
 - **Theme-safe rendering:** Remove the video's white background so the mascot sits cleanly on both light and dark surfaces, with a static transparent fallback for reduced-motion visitors.
+
+## Iteration 10 outcomes
+
+- **Uncluttered AI chat:** Render the AI result in a readable scrollable conversation area with a clear privacy boundary, compact suggestions, and an always-available follow-up composer.
+- **Mobile app header:** Keep the page label clear and place date controls, utilities, theme, and add action in a stable horizontally scrollable mobile row without overlap.
+- **Mobile category chart:** Reduce the vertical footprint of Spending by category by pairing the donut with a compact legend grid and readable category labels.
+- **Currency readability:** Show letter-based currency codes such as AED, SAR, and PHP with a separating space in compact chart labels while preserving standard currency symbols.

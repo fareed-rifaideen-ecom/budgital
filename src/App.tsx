@@ -218,7 +218,9 @@ function payloadConfidence(payload: Record<string, unknown>) { return typeof pay
 function formatCompactCurrency(value: number, currency?: CurrencyCode) {
   let active = currency;
   if (!active) { try { const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}') as { baseCurrency?: CurrencyCode }; active = stored.baseCurrency ?? 'USD'; } catch { active = 'USD'; } }
-  if (Math.abs(value) >= 1000) return `${currencySymbol(active)}${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
+  const symbol = currencySymbol(active);
+  const spacer = /^[A-Z]{3}$/.test(symbol) ? ' ' : '';
+  if (Math.abs(value) >= 1000) return `${symbol}${spacer}${(value / 1000).toFixed(value % 1000 === 0 ? 0 : 1)}k`;
   return formatCurrency(value, active);
 }
 
@@ -787,7 +789,7 @@ function TrendChart({ data, range }: { data: BudgitalData; range: DateRange }) {
   const baseCurrency = data.baseCurrency ?? 'USD';
   const values = months.map((month) => data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, baseCurrency), 0));
   const max = Math.max(...values, 1);
-  return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> last {monthCount} months</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>$0</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === endMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
+  return <div className="panel chart-panel trend-panel"><div className="panel-heading"><div><div className="panel-kicker"><BarChart3 size={14} /> Over time</div><h2>Spending trend</h2></div><span className="chart-legend"><i className="legend-line" /> last {monthCount} months</span></div><div className="trend-graph"><div className="y-labels"><span>{formatCompactCurrency(max)}</span><span>{formatCompactCurrency(max / 2)}</span><span>{formatCompactCurrency(0)}</span></div><div className="bars">{values.map((value, index) => <div className="bar-column" key={months[index]}><div className={`bar ${months[index] === endMonth ? 'current' : ''}`} style={{ height: `${Math.max(value / max * 100, value ? 8 : 2)}%` }}><span>{value ? formatCompactCurrency(value) : ''}</span></div><small>{new Intl.DateTimeFormat('en-US', { month: 'short' }).format(new Date(`${months[index]}-01T12:00:00`))}</small></div>)}</div></div></div>;
 }
 
 function buildInsights(data: BudgitalData, range: DateRange, totals: Totals, categorySpend: { category: Category; amount: number }[]) {
