@@ -981,3 +981,24 @@ html[data-theme='light'] .bud-mascot, html[data-theme='dark'] .bud-mascot { mix-
   .topbar.is-scrolled { padding: 11px 12px 10px; }
   .topbar-actions { margin-inline: -2px; padding-inline: 2px; }
 }
+
+/* Final responsive header fit: phone keeps essentials in one visible row */
+@media (max-width: 560px) {
+  .topbar-actions { overflow: visible; gap: 6px; }
+  .topbar .range-steps { display: none; }
+  .topbar .tutorial-trigger,
+  .topbar button[aria-label="Open terms and disclaimer"] { display: none; }
+  .range-cluster { flex: 1 1 auto; min-width: 0; }
+  .range-picker { width: 100%; max-width: none; min-width: 0; }
+  .topbar-right { flex: 0 0 auto; gap: 5px; }
+  .topbar-right .mobile-utility { flex: 0 0 36px; width: 36px; height: 38px; padding: 0; }
+  .topbar-right .theme-switch { flex: 0 0 62px; width: 62px; }
+  .topbar-add { flex: 0 0 38px; width: 38px; height: 38px; }
+}
+@media (max-width: 380px) {
+  .topbar-actions { gap: 5px; }
+  .topbar-right { gap: 4px; }
+  .topbar-right .mobile-utility { flex-basis: 34px; width: 34px; }
+  .topbar-right .theme-switch { flex-basis: 58px; width: 58px; }
+  .topbar-add { flex-basis: 36px; width: 36px; }
+}
