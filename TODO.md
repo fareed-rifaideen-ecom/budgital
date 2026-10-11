@@ -80,3 +80,10 @@
 - **Static real screenshots:** Replace embedded live app previews with static screenshots captured from the real app, and remove the iframe preview bypass from the app route.
 - **Trust signals:** Generate and add photographs of people who look relieved and in control, with an honest illustrative-photography note.
 - **GSAP ScrollTrigger:** Implement the referenced GSAP guide on the landing page with a persistent Bud mascot that follows the scroll narrative between section anchors and reverses when scrolling up, including mobile and reduced-motion profiles.
+
+## Iteration 8 outcomes
+
+- **Uploaded mascot:** Use the uploaded Budgital mascot artwork for the GSAP scroll trigger instead of the inline SVG mascot.
+- **Gradual CTA approach:** Move the mascot gradually toward the call to action of each section as the page scrolls, and reverse the journey when scrolling up.
+- **Screenshot section fix:** Remove the stretched caption blocks so each screenshot card sizes to its own content and the gallery reads evenly.
+- **Trust photo delivery:** Serve the generated trust photographs from the project itself so they render on the preview and published site.

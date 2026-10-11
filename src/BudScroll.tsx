@@ -3,16 +3,17 @@ import { useEffect, useRef } from 'react';
 type Conditions = { desktop?: boolean; mobile?: boolean };
 
 /**
- * "Bud" — the persistent scroll mascot.
+ * "Bud" — the persistent scroll mascot built from the uploaded Budgital artwork.
  *
- * A single overlay mascot is moved between DOM-derived anchors by one scrubbed
- * GSAP timeline, so scrolling down and up replays the same narrative in
- * reverse. Positions are document coordinates, which keeps the mascot aligned
- * on every breakpoint without hardcoded pixel paths.
+ * One overlay mascot is moved between CTA anchors by a single scrubbed GSAP
+ * timeline. Each keyframe is placed at the scroll progress where its anchor is
+ * centred in the viewport, so the mascot drifts gradually toward the call to
+ * action of every section instead of hopping between fixed coordinates, and it
+ * plays the whole journey in reverse when the visitor scrolls back up.
  */
 export function BudScroll() {
   const railRef = useRef<HTMLDivElement | null>(null);
-  const mascotRef = useRef<SVGSVGElement | null>(null);
+  const mascotRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
     const rail = railRef.current;
@@ -34,66 +35,88 @@ export function BudScroll() {
       ]);
       if (disposed) return;
       gsap.registerPlugin(ScrollTrigger);
-
       ScrollTrigger.config({ ignoreMobileResize: true });
 
-    const context = gsap.context(() => {
-      const media = gsap.matchMedia();
+      const context = gsap.context(() => {
+        const media = gsap.matchMedia();
 
-      media.add(
-        { desktop: '(min-width: 901px)', mobile: '(max-width: 900px)' },
-        (mediaContext) => {
-          const desktop = Boolean((mediaContext.conditions as Conditions)?.desktop);
-          const size = () => (desktop ? 86 : 60);
+        media.add(
+          { desktop: '(min-width: 901px)', mobile: '(max-width: 900px)' },
+          (mediaContext) => {
+            const desktop = Boolean((mediaContext.conditions as Conditions)?.desktop);
+            const size = () => (desktop ? 104 : 68);
 
-          const pointFor = (anchor: HTMLElement) => {
-            const rect = anchor.getBoundingClientRect();
-            const docLeft = rect.left + window.scrollX;
-            const docTop = rect.top + window.scrollY;
-            const side = anchor.dataset.budSide ?? 'right';
-            const edge = desktop ? 30 : 16;
-            let x = side === 'left' ? docLeft - size() - edge : docLeft + rect.width + edge;
-            const maxX = document.documentElement.clientWidth - size() - 12;
-            x = Math.min(Math.max(x, 12), Math.max(maxX, 12));
-            const y = docTop + Math.min(rect.height * 0.42, 200) - size() / 2;
-            return { x, y };
-          };
+            const targetFor = (anchor: HTMLElement) => {
+              const rect = anchor.getBoundingClientRect();
+              const docLeft = rect.left + window.scrollX;
+              const docTop = rect.top + window.scrollY;
+              const viewportWidth = document.documentElement.clientWidth;
+              const gap = desktop ? 18 : 10;
+              const explicitSide = anchor.dataset.budSide;
+              const side = explicitSide ?? (docLeft + rect.width / 2 < viewportWidth / 2 ? 'right' : 'left');
+              let x = side === 'right' ? docLeft + rect.width + gap : docLeft - size() - gap;
+              const maxX = viewportWidth - size() - 10;
+              x = Math.min(Math.max(x, 10), Math.max(maxX, 10));
+              // Sit slightly above the call to action so the mascot reads as
+              // approaching the button rather than covering it. Tall sections
+              // keep the mascot near their heading instead of drifting to the
+              // vertical middle, which would leave it far from the CTA.
+              const offset = Math.min(rect.height / 2, 230);
+              const y = docTop + offset - size() / 2 - size() * 0.18;
+              return { x, y, side };
+            };
 
-          gsap.set(rail, { xPercent: 0, yPercent: 0, force3D: true, ...pointFor(anchors[0]) });
+            // Scroll progress at which each anchor is centred in the viewport.
+            const progressFor = (anchor: HTMLElement) => {
+              const rect = anchor.getBoundingClientRect();
+              const docTop = rect.top + window.scrollY;
+              const scrollable = Math.max(document.documentElement.scrollHeight - window.innerHeight, 1);
+              const centred = docTop + rect.height / 2 - window.innerHeight / 2;
+              return Math.min(Math.max(centred / scrollable, 0), 1);
+            };
 
-          const timeline = gsap.timeline({
-            defaults: { ease: 'none', force3D: true },
-            scrollTrigger: {
-              trigger: document.documentElement,
-              start: 'top top',
-              end: 'bottom bottom',
-              scrub: desktop ? 0.85 : 0.55,
-              invalidateOnRefresh: true,
-            },
-          });
+            const first = targetFor(anchors[0]);
+            gsap.set(rail, { x: first.x, y: first.y, rotation: 0, scale: 1, force3D: true });
 
-          anchors.forEach((anchor, index) => {
-            if (index === 0) return;
-            timeline.to(rail, {
-              x: () => pointFor(anchor).x,
-              y: () => pointFor(anchor).y,
-              rotation: desktop ? (index % 2 ? 6 : -6) : 0,
-              scale: desktop && index % 3 === 0 ? 1.08 : 1,
-              duration: 1,
+            const timeline = gsap.timeline({
+              defaults: { force3D: true },
+              scrollTrigger: {
+                trigger: document.documentElement,
+                start: 'top top',
+                end: 'bottom bottom',
+                scrub: desktop ? 0.85 : 0.55,
+                invalidateOnRefresh: true,
+              },
             });
-          });
 
-          if (desktop) {
-            gsap.to(mascot, { y: -7, duration: 1.9, repeat: -1, yoyo: true, ease: 'sine.inOut', force3D: true });
-            gsap.to('.bud-leaf-front', { rotation: 8, duration: 1.7, repeat: -1, yoyo: true, transformOrigin: '60px 32px', ease: 'sine.inOut' });
-          }
+            let previousProgress = 0;
+            anchors.slice(1).forEach((anchor, index) => {
+              const progress = progressFor(anchor);
+              const span = Math.max(progress - previousProgress, 0.004);
+              const target = targetFor(anchor);
+              timeline.to(rail, {
+                x: () => targetFor(anchor).x,
+                y: () => targetFor(anchor).y,
+                rotation: desktop ? (index % 2 ? 5 : -5) : 0,
+                scale: desktop && index === anchors.length - 2 ? 1.12 : 1,
+                duration: span,
+                // Easing shapes the approach so the mascot eases into each CTA.
+                ease: 'power2.inOut',
+              }, previousProgress);
+              previousProgress = progress;
+            });
 
-          return () => {
-            timeline.scrollTrigger?.kill();
-            timeline.kill();
-          };
-        },
-      );
+            // Gentle breathing while the page is idle (desktop only).
+            if (desktop) {
+              gsap.to(mascot, { y: -9, duration: 2, repeat: -1, yoyo: true, ease: 'sine.inOut', force3D: true });
+            }
+
+            return () => {
+              timeline.scrollTrigger?.kill();
+              timeline.kill();
+            };
+          },
+        );
 
         return () => media.revert();
       }, rail);
@@ -105,6 +128,7 @@ export function BudScroll() {
       };
       window.addEventListener('resize', requestRefresh, { passive: true });
       const refreshOnLoad = window.setTimeout(() => ScrollTrigger.refresh(), 400);
+
       cleanup = () => {
         window.removeEventListener('resize', requestRefresh);
         window.clearTimeout(refreshTimer);
@@ -113,42 +137,22 @@ export function BudScroll() {
       };
     })();
 
-    return () => { disposed = true; cleanup?.(); };
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, []);
 
   return <div className="bud-rail" ref={railRef} aria-hidden="true">
-    <svg className="bud-mascot" ref={mascotRef} viewBox="0 0 120 120" role="presentation">
-      <defs>
-        <linearGradient id="bud-body" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--bud-body-a)" />
-          <stop offset="100%" stopColor="var(--bud-body-b)" />
-        </linearGradient>
-        <linearGradient id="bud-leaf" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stopColor="var(--bud-leaf-a)" />
-          <stop offset="100%" stopColor="var(--bud-leaf-b)" />
-        </linearGradient>
-      </defs>
-      <ellipse className="bud-shadow" cx="60" cy="106" rx="26" ry="6" />
-      <g className="bud-leaves">
-        <path className="bud-leaf bud-leaf-back" d="M60 34c-9-4-13-13-10-21 9 1 15 7 16 16Z" fill="url(#bud-leaf)" />
-        <path className="bud-leaf-front" d="M60 34c9-4 13-13 10-21-9 1-15 7-16 16Z" fill="url(#bud-leaf)" />
-      </g>
-      <circle className="bud-body" cx="60" cy="68" r="34" fill="url(#bud-body)" />
-      <g className="bud-mark">
-        <rect x="46" y="74" width="6" height="9" rx="2" />
-        <rect x="56" y="68" width="6" height="15" rx="2" />
-        <rect x="66" y="61" width="6" height="22" rx="2" />
-      </g>
-      <g className="bud-face">
-        <circle className="bud-eye" cx="51" cy="58" r="4.4" />
-        <circle className="bud-eye" cx="69" cy="58" r="4.4" />
-        <path className="bud-smile" d="M51 68c3.6 4.2 12.4 4.2 16 0" />
-      </g>
-      <g className="bud-sparks">
-        <circle className="bud-spark bud-spark-1" cx="26" cy="40" r="2.6" />
-        <circle className="bud-spark bud-spark-2" cx="95" cy="52" r="2.2" />
-        <circle className="bud-spark bud-spark-3" cx="88" cy="92" r="1.8" />
-      </g>
-    </svg>
+    <img
+      className="bud-mascot"
+      ref={mascotRef}
+      src="/bud-mascot.png"
+      srcSet="/bud-mascot-small.png 200w, /bud-mascot.png 360w"
+      sizes="(max-width: 900px) 68px, 104px"
+      alt=""
+      decoding="async"
+      draggable={false}
+    />
   </div>;
 }

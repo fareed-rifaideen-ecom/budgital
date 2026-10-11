@@ -773,3 +773,27 @@ html[data-scroll-direction='up'] .bud-mascot { transform: rotate(-5deg); transit
   .splash-baseline { stroke-dashoffset: 0; }
   .bud-rail { display: none; }
 }
+
+/* Iteration 8: uploaded mascot artwork, CTA approach motion, screenshot card fixes */
+.bud-rail { width: 104px; height: 104px; }
+.bud-mascot { display: block; width: 100%; height: auto; user-select: none; filter: drop-shadow(0 14px 18px rgba(16, 60, 44, .18)); }
+html[data-scroll-direction='down'] .bud-mascot { transform: rotate(4deg); transition: transform .5s ease; }
+html[data-scroll-direction='up'] .bud-mascot { transform: rotate(-5deg); transition: transform .5s ease; }
+
+.shot-gallery { align-items: start; }
+.shot-card { grid-template-rows: auto auto; align-content: start; align-self: start; }
+.shot-card figcaption { min-height: 0; }
+.shot-card-wide figcaption, .shot-card figcaption { align-content: start; }
+.showcase-cta { display: flex; align-items: center; gap: 18px; margin-top: 34px; flex-wrap: wrap; }
+.showcase-cta span { color: var(--t3); font-size: 12px; }
+
+@media (max-width: 900px) {
+  .bud-rail { width: 68px; height: 68px; }
+  .bud-mascot { filter: drop-shadow(0 8px 10px rgba(16, 60, 44, .16)); }
+}
+@media (max-width: 640px) {
+  .showcase-cta { gap: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bud-rail { display: none; }
+}
