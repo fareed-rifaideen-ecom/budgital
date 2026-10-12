@@ -1,20 +1,20 @@
 import { EventEmitter } from 'node:events';
 import { handleGeminiRequest } from '../../server/gemini.mjs';
 
-export default async function handler(event) {
-  if (event.httpMethod !== 'POST') {
+export default async function handler(request) {
+  if (request.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed.' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
   }
 
-  const request = new EventEmitter();
-  request.method = event.httpMethod;
-  request.socket = { remoteAddress: event.headers?.['x-nf-client-connection-ip'] || 'netlify-client' };
-  request.destroy = () => undefined;
+  const nodeRequest = new EventEmitter();
+  nodeRequest.method = request.method;
+  nodeRequest.socket = { remoteAddress: request.headers.get('x-nf-client-connection-ip') || 'netlify-client' };
+  nodeRequest.destroy = () => undefined;
 
-  const response = {
+  const nodeResponse = {
     statusCode: 200,
     headers: {},
     body: '',
@@ -22,15 +22,15 @@ export default async function handler(event) {
     end(body = '') { this.body = body; },
   };
 
-  const body = event.isBase64Encoded ? Buffer.from(event.body || '', 'base64').toString('utf8') : (event.body || '');
+  const body = await request.text();
   setTimeout(() => {
-    request.emit('data', Buffer.from(body));
-    request.emit('end');
+    nodeRequest.emit('data', Buffer.from(body));
+    nodeRequest.emit('end');
   }, 0);
-  await handleGeminiRequest(request, response);
+  await handleGeminiRequest(nodeRequest, nodeResponse);
 
-  return new Response(response.body, {
-    status: response.statusCode,
-    headers: response.headers,
+  return new Response(nodeResponse.body, {
+    status: nodeResponse.statusCode,
+    headers: nodeResponse.headers,
   });
 }
