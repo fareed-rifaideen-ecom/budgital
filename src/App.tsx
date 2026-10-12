@@ -38,6 +38,7 @@ import {
   WalletCards,
   X,
 } from 'lucide-react';
+import { PwaInstallPrompt } from './PwaInstallPrompt';
 
 type TransactionType = 'income' | 'expense';
 type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY' | 'AED' | 'SAR' | 'PHP';
@@ -92,9 +93,9 @@ type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 't
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
-const LIGHT_MARK = '/manus-storage/async-images/42W02Z4A8bTo9GNAeewP8E/image-1.webp';
-const DARK_MARK = '/manus-storage/async-images/42W02Z4A8bTo9GNAeewP8E/image-2.webp';
-const LIGHT_FALLBACK = '/budgital-mark-light.svg';
+const LIGHT_MARK = '/budgital-mark-light.svg';
+const DARK_MARK = '/budgital-mark-dark.svg';
+const LIGHT_FALLBACK = '/logo.svg';
 const DARK_FALLBACK = '/budgital-mark-dark.svg';
 const TERMS_KEY = 'budgital-terms-v1';
 const AI_DAILY_LIMIT = 12;
@@ -712,6 +713,8 @@ export function App() {
       </main>
 
       <TabBar view={view} onNavigate={goTo} onAdd={() => { setEditingTransaction(null); setShowAdd(true); }} />
+
+      <PwaInstallPrompt />
 
       {!showAi && <button className="ai-fab" onClick={runAiInsights} aria-label="Open Budgital AI chatbot"><Bot size={19} /><span>Ask AI</span></button>}
       <BackToTop />

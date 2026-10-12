@@ -124,3 +124,27 @@ The mascot is now the uploaded video rather than a travelling image. It is pinne
 ## Iteration 10 — mobile chat and app-shell polish
 
 The AI conversation now behaves as a proper responsive sheet: a floating panel on desktop and a full-width bottom sheet on phones, with a bounded overall height, a scrollable result thread, compact privacy copy, restrained suggestion chips, and a composer that remains available without squeezing the AI answer into a small viewport. The mobile app header is a single horizontally scrollable control row beneath a clear page crumb, preventing the range selector, utilities, theme switch, and add action from colliding. The spending-by-category chart switches from a tall stacked layout to a compact chart-plus-legend grid on phones, with tighter legend rows and ellipsis for long category names. Currency abbreviations such as AED, SAR, and PHP now render with readable spacing in compact chart labels, while symbol currencies remain compact.
+
+
+## Iteration 11 — free pilot foundation: PWA, performance, and Netlify readiness
+
+### Decision
+
+Begin with a reversible, no-cost audience-validation phase. Budgital remains usable as a guest/local-first app; accounts, cloud backup, OCR, voice input, theme customisation, and app-store packaging remain later phases until user evidence justifies their complexity and data responsibilities.
+
+### Implementation
+
+- Add an installable web-app manifest, local 192px/512px icons, and a production-only service worker. The worker caches only the app shell and static assets, uses network-first navigation, and never intercepts `/api/` or `/.netlify/` requests.
+- Add a non-blocking `beforeinstallprompt` card. It appears only when the browser offers installation, can be dismissed for the session, and does not add a header row that could break mobile layouts.
+- Prefer local SVG brand marks over remote managed-image URLs so first paint is not delayed by an external asset and the logo remains reliable offline.
+- Keep the landing page's first screenshot eager and defer carousel thumbnails; reduce mascot video preload from `auto` to `metadata` so non-critical media does not compete with the first meaningful paint.
+- Add `netlify.toml` and a Netlify Function adapter that reuses the existing server-only Gemini validation and aggregate-only payload boundary. Netlify can run the site without Gemini when the key is omitted.
+- Keep hashed assets immutable and HTML revalidated. Treat the free Netlify URL as the initial pilot surface; connect a custom domain only after basic audience feedback.
+
+### Deferred until evidence
+
+- Optional sign-in and encrypted cloud backup.
+- Receipt image/OCR capture and voice entry.
+- Theme palette selector beyond Light/Dark.
+- Capacitor/Expo packaging and Google Play/App Store submissions.
+- SSR migration. The current split lazy-loaded SPA already avoids loading the dashboard on the public landing route; measure real performance before moving to a framework with server rendering.

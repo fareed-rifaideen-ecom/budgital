@@ -148,7 +148,7 @@ export function BudScroll() {
         poster="/mascot/bud-scrub-poster.jpg"
         muted
         playsInline
-        preload="auto"
+        preload="metadata"
         disablePictureInPicture
         onError={(event) => {
           const media = event.currentTarget;

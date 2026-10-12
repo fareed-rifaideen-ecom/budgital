@@ -1103,3 +1103,34 @@ html[data-theme='dark'] .data-card.primary-data .primary-button { background: va
 html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--accent-text); }
 @media (max-width: 560px) { .donut-center strong { font-size: 17px; letter-spacing: -.7px; } }
 @media (max-width: 400px) { .donut-center strong { font-size: 15px; } }
+
+/* Phase 1: installable PWA prompt — intentionally compact and non-blocking. */
+.pwa-install-card {
+  position: fixed;
+  z-index: 65;
+  right: 24px;
+  bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px 13px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 80%, transparent);
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  color: var(--ink);
+  box-shadow: 0 18px 46px rgba(12, 35, 27, .18);
+  backdrop-filter: blur(22px) saturate(1.2);
+  animation: pwa-install-in .42s cubic-bezier(.22, 1, .36, 1) both;
+}
+.pwa-install-icon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 11px; background: var(--accent-soft); color: var(--accent-text); }
+.pwa-install-copy { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.pwa-install-copy strong { font-size: 11px; letter-spacing: -.1px; }
+.pwa-install-copy small { color: var(--t3); font-size: 9px; line-height: 1.35; }
+.pwa-install-action { flex: 0 0 auto; min-height: 32px; padding: 0 12px; border: 0; border-radius: 10px; background: var(--solid); color: var(--on-solid); font: inherit; font-size: 10px; font-weight: 800; cursor: pointer; transition: transform .2s ease, filter .2s ease; }
+.pwa-install-action:hover { transform: translateY(-2px); filter: brightness(1.04); }
+.pwa-install-dismiss { display: grid; place-items: center; flex: 0 0 26px; width: 26px; height: 26px; margin-right: -4px; border: 0; border-radius: 50%; background: transparent; color: var(--t3); cursor: pointer; }
+.pwa-install-dismiss:hover { background: var(--surface-3); color: var(--ink); }
+@keyframes pwa-install-in { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
+@media (max-width: 560px) { .pwa-install-card { right: 12px; bottom: calc(78px + env(safe-area-inset-bottom)); width: calc(100vw - 24px); border-radius: 16px; } }
+@media (prefers-reduced-motion: reduce) { .pwa-install-card { animation: none; } }
