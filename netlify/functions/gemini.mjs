@@ -3,7 +3,10 @@ import { handleGeminiRequest } from '../../server/gemini.mjs';
 
 export default async function handler(event) {
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify({ error: 'Method not allowed.' }) };
+    return new Response(JSON.stringify({ error: 'Method not allowed.' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    });
   }
 
   const request = new EventEmitter();
@@ -26,5 +29,8 @@ export default async function handler(event) {
   }, 0);
   await handleGeminiRequest(request, response);
 
-  return { statusCode: response.statusCode, headers: response.headers, body: response.body };
+  return new Response(response.body, {
+    status: response.statusCode,
+    headers: response.headers,
+  });
 }

@@ -148,3 +148,8 @@ Begin with a reversible, no-cost audience-validation phase. Budgital remains usa
 - Theme palette selector beyond Light/Dark.
 - Capacitor/Expo packaging and Google Play/App Store submissions.
 - SSR migration. The current split lazy-loaded SPA already avoids loading the dashboard on the public landing route; measure real performance before moving to a framework with server rendering.
+
+
+### Deployment smoke-test corrections
+
+The first Netlify deploy exposed two platform-specific differences: Netlify does not automatically apply the local server's `/app` SPA fallback, and Netlify Functions require a Web `Response` rather than the local Node-style `{ statusCode, headers, body }` object. The deployment configuration now includes explicit `/app` and `/app/*` fallbacks, while the Gemini adapter converts the shared handler output into a standards-compliant `Response`.
