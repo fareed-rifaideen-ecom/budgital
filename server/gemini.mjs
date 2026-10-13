@@ -137,9 +137,11 @@ function fxPrompt(from, to) {
 }
 
 function upstreamError(status) {
+  if (status === 400) return { status: 502, error: 'Gemini rejected the request. Check the Netlify model and API-key settings.' };
+  if (status === 401 || status === 403) return { status: 502, error: 'The Gemini API key is missing or invalid in Netlify.' };
   if (status === 429) return { status: 429, error: 'Gemini free-tier limit reached. Try again later.' };
   if (status === 503) return { status: 503, error: 'Gemini is busy right now. Try again in a moment.' };
-  return { status: 502, error: 'Gemini could not complete this request.' };
+  return { status: 502, error: 'Gemini could not complete this request. Check the Netlify function configuration.' };
 }
 
 export async function handleGeminiRequest(req, res) {

@@ -101,3 +101,5 @@
 - **Mobile app header:** Keep the page label clear and place date controls, utilities, theme, and add action in a stable horizontally scrollable mobile row without overlap.
 - **Mobile category chart:** Reduce the vertical footprint of Spending by category by pairing the donut with a compact legend grid and readable category labels.
 - **Currency readability:** Show letter-based currency codes such as AED, SAR, and PHP with a separating space in compact chart labels while preserving standard currency symbols.
+
+- **Pilot feedback fixes** — Make Gemini failures explain whether the Netlify key/model configuration needs attention; expose a saved default currency for new entries; keep AED, SAR, and PHP selectable; add an exchange-rate route alias; and keep the mobile Light/Dark thumb centered at every supported width.

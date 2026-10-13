@@ -153,3 +153,10 @@ Begin with a reversible, no-cost audience-validation phase. Budgital remains usa
 ### Deployment smoke-test corrections
 
 The first Netlify deploy exposed two platform-specific differences: Netlify does not automatically apply the local server's `/app` SPA fallback, and Netlify Functions require a Web `Response` rather than the local Node-style `{ statusCode, headers, body }` object. The deployment configuration now includes explicit `/app` and `/app/*` fallbacks, while the Gemini adapter converts the shared handler output into a standards-compliant `Response`.
+
+## Pilot feedback fix — Gemini diagnostics, default currency, and theme toggle
+
+- Added an explicit saved default-currency label for new income and expense entries, including AED, SAR, and PHP in the supported list.
+- Added a Netlify alias for `/api/gemini/exchange-rate` and clearer upstream error messages.
+- Replaced conflicting breakpoint-specific theme-thumb translations with geometry-safe absolute positioning for phone and tablet widths.
+- Live testing showed the Netlify Gemini function reaches the proxy but returns an upstream 502; the remaining production action is to verify `GEMINI_API_KEY` in Netlify production environment variables.

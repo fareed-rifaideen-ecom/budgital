@@ -1134,3 +1134,19 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
 @keyframes pwa-install-in { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
 @media (max-width: 560px) { .pwa-install-card { right: 12px; bottom: calc(78px + env(safe-area-inset-bottom)); width: calc(100vw - 24px); border-radius: 16px; } }
 @media (prefers-reduced-motion: reduce) { .pwa-install-card { animation: none; } }
+
+
+/* Feedback fix: center the theme thumb with absolute geometry instead of
+   breakpoint-specific translate values, which kept drifting on narrow phones. */
+.theme-switch { position: relative; display: inline-block; overflow: hidden; }
+.theme-thumb { position: absolute; left: 3px; top: 3px; margin: 0; transform: rotate(0deg); transition: left .55s cubic-bezier(.34, 1.4, .64, 1), transform .55s cubic-bezier(.34, 1.4, .64, 1), background .45s ease; }
+.theme-switch[data-active='dark'] .theme-thumb { left: calc(100% - 31px); transform: rotate(180deg); }
+@media (max-width: 560px) {
+  .theme-switch, .topbar-right .theme-switch { width: 62px; height: 34px; padding: 3px; }
+  .theme-thumb { width: 26px; height: 26px; top: 3px; left: 3px; }
+  .theme-switch[data-active='dark'] .theme-thumb { left: calc(100% - 29px); }
+}
+@media (max-width: 380px) {
+  .theme-switch, .topbar-right .theme-switch { width: 58px; height: 34px; }
+  .theme-switch[data-active='dark'] .theme-thumb { left: calc(100% - 29px); }
+}
