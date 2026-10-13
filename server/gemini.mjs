@@ -136,12 +136,13 @@ function fxPrompt(from, to) {
   return `Return only JSON matching {"rate":number,"confidence":"high|medium|low","note":"string"}. Estimate the current conversion rate from 1 ${from} to ${to} using your latest reliable knowledge. Never invent a precise live quote: if uncertain, use confidence low and explain that the user should verify the rate. Keep the rate positive, below 100000, and the note under 120 characters.`;
 }
 
-function upstreamError(status) {
-  if (status === 400) return { status: 502, error: 'Gemini rejected the request. Check the Netlify model and API-key settings.' };
+function upstreamError(status, responseBody) {
+  const detail = cleanText(responseBody?.error?.message, 180);
+  if (status === 400) return { status: 502, error: detail ? `Gemini rejected the request: ${detail}` : 'Gemini rejected the request. Check the Netlify model and API-key settings.' };
   if (status === 401 || status === 403) return { status: 502, error: 'The Gemini API key is missing or invalid in Netlify.' };
   if (status === 429) return { status: 429, error: 'Gemini free-tier limit reached. Try again later.' };
   if (status === 503) return { status: 503, error: 'Gemini is busy right now. Try again in a moment.' };
-  return { status: 502, error: 'Gemini could not complete this request. Check the Netlify function configuration.' };
+  return { status: 502, error: detail ? `Gemini could not complete this request: ${detail}` : 'Gemini could not complete this request. Check the Netlify function configuration.' };
 }
 
 export async function handleGeminiRequest(req, res) {
@@ -165,7 +166,7 @@ export async function handleGeminiRequest(req, res) {
         contents: [{ role: 'user', parts: [{ text: fxPrompt(from, to) }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 160, responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { rate: { type: 'NUMBER' }, confidence: { type: 'STRING' }, note: { type: 'STRING' } }, required: ['rate', 'confidence', 'note'] } },
       });
-      if (!ok) { const failure = upstreamError(status); return sendJson(res, failure.status, { error: failure.error }); }
+      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
       let parsed;
       try { parsed = JSON.parse(responseBody?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'); } catch { throw new Error('Gemini returned an unreadable exchange rate.'); }
       const rate = Number(parsed.rate);
@@ -186,7 +187,7 @@ export async function handleGeminiRequest(req, res) {
         ],
         generationConfig: { temperature: 0.4, maxOutputTokens: 420 },
       });
-      if (!ok) { const failure = upstreamError(status); return sendJson(res, failure.status, { error: failure.error }); }
+      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
       const answer = cleanText(
         (responseBody?.candidates?.[0]?.content?.parts || []).map((part) => part?.text || '').join(' ').trim(),
         900,
@@ -209,7 +210,7 @@ export async function handleGeminiRequest(req, res) {
         },
       },
     });
-    if (!ok) { const failure = upstreamError(status); return sendJson(res, failure.status, { error: failure.error }); }
+    if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
     const text = responseBody?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     let parsed;
     try {

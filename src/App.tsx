@@ -87,6 +87,7 @@ type BudgitalData = {
   budgets: Budget[];
   isDemo: boolean;
   baseCurrency?: CurrencyCode;
+  defaultCurrency?: CurrencyCode;
 };
 
 type ImportRow = Transaction & { valid: boolean; error?: string; recordType?: 'transaction' | 'category' | 'budget'; importCategory?: Category; importBudget?: Budget };
@@ -186,13 +187,14 @@ function demoData(): BudgitalData {
     ],
     isDemo: true,
     baseCurrency: 'USD',
+    defaultCurrency: 'USD',
   };
 }
 
 function loadData(): BudgitalData {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) { const parsed = JSON.parse(stored) as BudgitalData; return { ...parsed, baseCurrency: parsed.baseCurrency ?? 'USD' }; }
+    if (stored) { const parsed = JSON.parse(stored) as BudgitalData; return { ...parsed, baseCurrency: parsed.baseCurrency ?? 'USD', defaultCurrency: parsed.defaultCurrency ?? parsed.baseCurrency ?? 'USD' }; }
   } catch {
     // Fall back to the friendly starter state when storage is unavailable.
   }
@@ -545,13 +547,27 @@ export function App() {
         return rate ? { ...transaction, fxRateToBase: rate, fxSource: `Gemini estimate · ${foreignConfidence.get(native) ?? 'low'}` } : transaction;
       });
       const budgets = data.budgets.map((budget) => ({ ...budget, amount: budget.amount * oldBaseToNew }));
-      const next = { ...data, baseCurrency, budgets, transactions };
+      const next = { ...data, baseCurrency, defaultCurrency: baseCurrency, budgets, transactions };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       mutate(next);
       setFxMessage(`Converted ${oldBase} → ${baseCurrency}. Gemini estimates are informational; verify before relying on them.`);
     } catch (error) {
       setFxMessage(error instanceof Error ? error.message : 'Currency conversion was not completed.');
     }
+  }
+  function handleDefaultCurrencyChange(currency: CurrencyCode) {
+    const currentBase = data.baseCurrency ?? 'USD';
+    if (currency === currentBase) {
+      mutate({ ...data, defaultCurrency: currency });
+      return;
+    }
+    if (data.isDemo || data.transactions.length === 0) {
+      mutate({ ...data, baseCurrency: currency, defaultCurrency: currency });
+      setFxMessage(`Dashboard and new entries now use ${currency}.`);
+      return;
+    }
+    mutate({ ...data, defaultCurrency: currency });
+    void handleBaseCurrencyChange(currency);
   }
   async function refreshExchangeRates() {
     const baseCurrency = data.baseCurrency ?? 'USD';
@@ -655,10 +671,10 @@ export function App() {
 
   function clearData() {
     if (!window.confirm('Clear all transactions and budgets? This cannot be undone.')) return;
-    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD' });
+    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD', defaultCurrency: data.defaultCurrency ?? data.baseCurrency ?? 'USD' });
   }
 
-  if (!termsAccepted) return <TermsGate theme={theme} defaultCurrency={data.baseCurrency ?? 'USD'} onAccept={(currency) => { const next = { ...data, baseCurrency: currency }; localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); setData(next); localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
+  if (!termsAccepted) return <TermsGate theme={theme} defaultCurrency={data.defaultCurrency ?? data.baseCurrency ?? 'USD'} onAccept={(currency) => { const next = { ...data, baseCurrency: currency, defaultCurrency: currency }; localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); setData(next); localStorage.setItem(TERMS_KEY, 'accepted'); setTermsAccepted(true); }} />;
   const nav = [
     { id: 'overview' as const, label: 'Overview', icon: Home },
     { id: 'transactions' as const, label: 'Transactions', icon: Receipt },
@@ -709,7 +725,7 @@ export function App() {
           {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onOpenRange={() => setShowRange(true)} />}
           {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} />}
           {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
-          {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} baseCurrency={data.baseCurrency ?? 'USD'} onBaseCurrencyChange={handleBaseCurrencyChange} onRefreshRates={refreshExchangeRates} fxMessage={fxMessage} />}
+          {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={() => exportCsv(data)} onClear={clearData} baseCurrency={data.baseCurrency ?? 'USD'} defaultCurrency={data.defaultCurrency ?? data.baseCurrency ?? 'USD'} onDefaultCurrencyChange={handleDefaultCurrencyChange} onRefreshRates={refreshExchangeRates} fxMessage={fxMessage} />}
         </div>
       </main>
 
@@ -721,7 +737,7 @@ export function App() {
       <BackToTop />
 
       {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
-      {showAdd && <TransactionModal data={data} baseCurrency={data.baseCurrency ?? 'USD'} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
+      {showAdd && <TransactionModal data={data} baseCurrency={data.baseCurrency ?? 'USD'} defaultCurrency={data.defaultCurrency ?? data.baseCurrency ?? 'USD'} month={anchor} categories={data.categories} transaction={editingTransaction} onClose={() => { setShowAdd(false); setEditingTransaction(null); }} onSave={handleSaveTransaction} />}
       {showImport && <ImportModal data={data} onClose={() => setShowImport(false)} onImport={handleImport} />}
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showFeedback && <AppFeedbackModal feedback={feedback} setFeedback={setFeedback} saved={feedbackSaved} onSaved={() => setFeedbackSaved(true)} onClose={() => { setShowFeedback(false); setFeedbackSaved(false); }} />}
@@ -885,7 +901,7 @@ function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { 
   return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
 }
 
-function DataView({ data, onImport, onExport, onClear, baseCurrency, onBaseCurrencyChange, onRefreshRates, fxMessage }: { data: BudgitalData; onImport: () => void; onExport: () => void; onClear: () => void; baseCurrency: CurrencyCode; onBaseCurrencyChange: (currency: CurrencyCode) => void; onRefreshRates: () => void; fxMessage: string }) {
+function DataView({ data, onImport, onExport, onClear, baseCurrency, defaultCurrency, onDefaultCurrencyChange, onRefreshRates, fxMessage }: { data: BudgitalData; onImport: () => void; onExport: () => void; onClear: () => void; baseCurrency: CurrencyCode; defaultCurrency: CurrencyCode; onDefaultCurrencyChange: (currency: CurrencyCode) => void; onRefreshRates: () => void; fxMessage: string }) {
   const missingFx = data.transactions.filter((transaction) => transaction.currency && transaction.currency !== baseCurrency && !hasKnownBaseAmount(transaction, baseCurrency)).length;
   return <>
     <section className="page-intro compact"><div><div className="kicker"><FileUp size={14} /> Your data, your rules</div><h1>Import & export</h1><p>Everything stays local. Move a copy whenever you need one.</p></div><span className="local-badge"><span className="local-pulse" /> Local-only storage</span></section>
@@ -893,17 +909,17 @@ function DataView({ data, onImport, onExport, onClear, baseCurrency, onBaseCurre
       <div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Basic CSV: date, type, amount, category, description · Budgital backup CSVs also preserve categories, budgets, currency, and rates</div></div>
       <div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download your transactions, categories, and budgets as one CSV file you can keep or edit.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export</div></div>
     </div>
-    <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Multi-currency, one clear base</h2><p>Choose the default currency for new entries. AED, SAR, PHP, USD, EUR, GBP, LKR, INR, AUD, CAD, and JPY are supported. Gemini can refresh cautious conversion estimates.</p></div><label className="currency-setting"><span>Default currency for new entries</span><select value={baseCurrency} onChange={(event) => onBaseCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}{missingFx > 0 && <div className="format-note warning-note"><ShieldCheckIcon /> {missingFx} foreign {missingFx === 1 ? 'entry needs' : 'entries need'} a verified rate and are excluded from base totals until one is available.</div>}</div>
+    <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Choose your default currency</h2><p>Choose the default currency for new entries. AED, SAR, PHP, USD, EUR, GBP, LKR, INR, AUD, CAD, and JPY are supported. Gemini can refresh cautious conversion estimates.</p></div><label className="currency-setting"><span>Default for new entries</span><select value={defaultCurrency} onChange={(event) => onDefaultCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}{missingFx > 0 && <div className="format-note warning-note"><ShieldCheckIcon /> {missingFx} foreign {missingFx === 1 ? 'entry needs' : 'entries need'} a verified rate and are excluded from base totals until one is available.</div>}</div>
     <div className="panel safety-panel"><div className="safety-icon"><Landmark size={19} /></div><div><h2>Private by default</h2><p>Budgital does not send your numbers anywhere. Clearing browser storage or using a different browser will create a separate budget.</p></div>{data.isDemo && <button className="text-button" onClick={onClear}><Trash2 size={15} /> Clear starter data</button>}<button className="text-button danger-text" onClick={onClear}><Trash2 size={15} /> Clear all data</button></div>
   </>;
 }
-function TransactionModal({ data, baseCurrency, month, categories, transaction, onClose, onSave }: { data: BudgitalData; baseCurrency: CurrencyCode; month: string; categories: Category[]; transaction: Transaction | null; onClose: () => void; onSave: (transaction: Transaction) => void }) {
+function TransactionModal({ data, baseCurrency, defaultCurrency, month, categories, transaction, onClose, onSave }: { data: BudgitalData; baseCurrency: CurrencyCode; defaultCurrency: CurrencyCode; month: string; categories: Category[]; transaction: Transaction | null; onClose: () => void; onSave: (transaction: Transaction) => void }) {
   const [type, setType] = useState<TransactionType>(transaction?.type ?? 'expense');
   const [amount, setAmount] = useState(transaction?.amount.toString() ?? '');
   const [date, setDate] = useState(transaction?.date ?? `${month}-${String(new Date().getDate()).padStart(2, '0')}`);
   const [categoryId, setCategoryId] = useState(transaction?.categoryId ?? categories.find((category) => category.kind !== 'income')?.id ?? categories[0]?.id ?? '');
   const [description, setDescription] = useState(transaction?.description ?? '');
-  const [currency, setCurrency] = useState<CurrencyCode>(transaction?.currency ?? baseCurrency);
+  const [currency, setCurrency] = useState<CurrencyCode>(transaction?.currency ?? defaultCurrency);
   const [fxRate, setFxRate] = useState(String(transaction?.fxRateToBase ?? ''));
   const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
   useEffect(() => { if (!available.some((category) => category.id === categoryId)) setCategoryId(available[0]?.id ?? ''); }, [type]);
