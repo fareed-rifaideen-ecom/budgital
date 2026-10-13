@@ -103,3 +103,5 @@
 - **Currency readability:** Show letter-based currency codes such as AED, SAR, and PHP with a separating space in compact chart labels while preserving standard currency symbols.
 
 - **Pilot feedback fixes** — Make Gemini failures explain whether the Netlify key/model configuration needs attention; expose a saved default currency for new entries; keep AED, SAR, and PHP selectable; add an exchange-rate route alias; and keep the mobile Light/Dark thumb centered at every supported width.
+
+- **First-run currency and Gemini production setup** — Require a default currency selection before entering the app, preserve it for new entries, keep the dark theme thumb inside the mobile pill, and verify the Netlify Functions production key before enabling Gemini-dependent features.

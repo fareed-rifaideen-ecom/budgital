@@ -1150,3 +1150,17 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .theme-switch, .topbar-right .theme-switch { width: 58px; height: 34px; }
   .theme-switch[data-active='dark'] .theme-thumb { left: calc(100% - 29px); }
 }
+
+
+/* Final theme geometry: right-anchoring is more reliable than translating a
+   variable-width thumb across the pill on narrow mobile headers. */
+.theme-thumb { left: 3px; right: auto; }
+.theme-switch[data-active='dark'] .theme-thumb { left: auto !important; right: 3px !important; transform: rotate(180deg) !important; }
+.terms-currency-field { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 14px; color: var(--ink); font-size: 11px; font-weight: 800; }
+.terms-currency-field select { width: 100%; border: 1px solid var(--line-strong); border-radius: 12px; padding: 12px 13px; background: var(--panel); color: var(--ink); font: inherit; font-size: 13px; }
+.terms-currency-field select:focus { outline: none; border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--focus); }
+.terms-currency-field small { color: var(--t3); font-size: 10px; font-weight: 600; line-height: 1.5; }
+@media (max-width: 560px) {
+  .theme-switch[data-active='dark'] .theme-thumb { right: 3px !important; left: auto !important; }
+  .terms-card { width: min(100% - 24px, 460px); padding: 24px 18px; }
+}

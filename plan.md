@@ -160,3 +160,9 @@ The first Netlify deploy exposed two platform-specific differences: Netlify does
 - Added a Netlify alias for `/api/gemini/exchange-rate` and clearer upstream error messages.
 - Replaced conflicting breakpoint-specific theme-thumb translations with geometry-safe absolute positioning for phone and tablet widths.
 - Live testing showed the Netlify Gemini function reaches the proxy but returns an upstream 502; the remaining production action is to verify `GEMINI_API_KEY` in Netlify production environment variables.
+
+## Pilot feedback fix — first-run currency onboarding and toggle bounds
+
+- The required pre-use agreement screen now asks the user to choose a default currency before the workspace opens. The selection is stored with local data and becomes the default for new entries.
+- The mobile theme thumb now uses absolute left/right anchoring; dark mode cannot translate the thumb beyond the pill.
+- Gemini remains a production configuration issue: the deployed endpoint returns a model/API-key rejection while the same model succeeds locally. Netlify must have a `GEMINI_API_KEY` variable in the Functions/Production scope.
