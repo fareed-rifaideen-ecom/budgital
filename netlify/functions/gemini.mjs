@@ -3,7 +3,7 @@ import { handleGeminiRequest } from '../../server/gemini.mjs';
 
 export default async function handler(request) {
   if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed.' }), {
+    return new Response(JSON.stringify({ code: 'method_not_allowed', retryable: false, error: 'Method not allowed.' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json; charset=utf-8' },
     });
