@@ -624,6 +624,7 @@ export function App() {
     const insights = buildInsights(data, range, totals, categorySpend);
     return {
       period: rangeLabel(range),
+      currency: data.baseCurrency ?? 'USD',
       totals: { income: totals.income, expenses: totals.expenses, budget: totals.budget, left: totals.left },
       categorySpend: categorySpend.map(({ category, amount }) => ({ category: category.name, amount })),
       localInsights: insights.map((insight) => insight.title),

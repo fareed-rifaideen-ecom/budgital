@@ -49,8 +49,10 @@ function validateSnapshot(snapshot) {
   if (!totals || !['income', 'expenses', 'budget', 'left'].every((key) => Number.isFinite(Number(totals[key])))) throw new Error('Valid totals are required.');
   const categorySpend = snapshot?.categorySpend;
   if (!Array.isArray(categorySpend) || categorySpend.length > 40) throw new Error('Valid category totals are required.');
+  const currency = validateCurrency(snapshot?.currency || 'USD');
   return {
     period: cleanText(snapshot?.period, 60) || 'the selected period',
+    currency,
     totals: Object.fromEntries(['income', 'expenses', 'budget', 'left'].map((key) => [key, round(totals[key])])),
     categorySpend: categorySpend
       .map((item) => ({ category: cleanText(item?.category, 60), amount: round(item?.amount || 0) }))
@@ -82,7 +84,7 @@ function normalizeHistory(history, question) {
 }
 
 function insightPrompt(input) {
-  return `Give a calm, concrete read of this budget period.
+  return `Give a calm, concrete read of this budget period. Every amount in the snapshot is denominated in ${input.currency}; preserve that currency and never convert or reinterpret the amounts.
 
 Return only valid JSON matching this shape: {"headline":"short sentence","bullets":["2 to 3 specific observations"],"nextStep":"one small practical action"}.
 
@@ -91,7 +93,7 @@ ${JSON.stringify(input)}`;
 }
 
 function chatPrompt(input, question) {
-  return `Aggregate snapshot for ${input.period} (no individual transactions were shared):
+  return `Aggregate snapshot for ${input.period}, with every amount in ${input.currency} (no individual transactions were shared):
 ${JSON.stringify(input)}
 
 Answer this follow-up question about that snapshot: ${question}`;
