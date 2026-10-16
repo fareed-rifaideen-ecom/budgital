@@ -55,6 +55,8 @@ type View = 'overview' | 'transactions' | 'budgets' | 'data';
 type Theme = 'light' | 'dark';
 type AiInsight = { headline: string; bullets: string[]; nextStep: string };
 type AiMessage = { id: string; role: 'user' | 'assistant'; text: string };
+type AiErrorCode = 'disabled' | 'daily_limit' | 'not_configured' | 'invalid_key' | 'rate_limit' | 'busy' | 'network' | 'validation' | 'response_invalid' | 'service' | 'unknown';
+type AiErrorDetails = { code: AiErrorCode; message: string; retryable: boolean };
 type RangePreset = 'thisMonth' | 'lastMonth' | 'last3' | 'last6' | 'ytd' | 'all' | 'custom';
 type DateRange = { start: string; end: string; preset: RangePreset };
 type Totals = { income: number; expenses: number; budget: number; left: number; budgetLeft: number; budgetMonths: number };
@@ -134,6 +136,18 @@ function formatBytes(value: number) {
 }
 function transactionFingerprint(transaction: Pick<Transaction, 'date' | 'type' | 'amount' | 'categoryId' | 'description' | 'currency'>) {
   return [transaction.date, transaction.type, transaction.amount.toFixed(2), transaction.categoryId, transaction.description.trim().toLowerCase(), transaction.currency ?? ''].join('|');
+}
+function createAiError(message: string, code: AiErrorCode, retryable = false) {
+  const error = new Error(message) as Error & { code?: AiErrorCode; retryable?: boolean };
+  error.code = code;
+  error.retryable = retryable;
+  return error;
+}
+function classifyAiError(error: unknown): AiErrorDetails {
+  const candidate = error as { message?: unknown; code?: unknown; retryable?: unknown };
+  const code = typeof candidate?.code === 'string' ? candidate.code as AiErrorCode : error instanceof TypeError ? 'network' : 'unknown';
+  const message = typeof candidate?.message === 'string' ? candidate.message : 'The AI service could not respond.';
+  return { code, message, retryable: candidate?.retryable === true || code === 'network' || code === 'busy' || code === 'service' || code === 'rate_limit' };
 }
 
 const colors = ['#c8ee68', '#ffb59d', '#8cc4ff', '#caa7f8', '#f3cc69', '#75d2c1', '#f28c9a', '#9aa9a4'];
@@ -389,6 +403,7 @@ export function App() {
   const [aiMessages, setAiMessages] = useState<AiMessage[]>([]);
   const [aiAsking, setAiAsking] = useState(false);
   const [aiError, setAiError] = useState('');
+  const [aiErrorCode, setAiErrorCode] = useState<AiErrorCode>('unknown');
   const [aiFailedQuestion, setAiFailedQuestion] = useState('');
   const [aiUsage, setAiUsage] = useState(usageToday);
   const [aiEnabled, setAiEnabled] = useState(loadAiEnabled);
@@ -616,8 +631,8 @@ export function App() {
   }
 
   async function requestAi(body: Record<string, unknown>) {
-    if (!aiEnabled) throw new Error('AI is turned off. Enable it in Data → AI preferences to request a Gemini response.');
-    if (!consumeAiUse()) throw new Error(`Daily AI limit reached (${AI_DAILY_LIMIT} requests). Your limit resets tomorrow.`);
+    if (!aiEnabled) throw createAiError('AI is turned off. Enable it in Data → AI preferences to request a Gemini response.', 'disabled');
+    if (!consumeAiUse()) throw createAiError(`Daily AI limit reached (${AI_DAILY_LIMIT} requests). Your limit resets tomorrow.`, 'daily_limit');
     setAiUsage(usageToday());
     try {
       const response = await fetch('/api/gemini/insights', {
@@ -625,8 +640,13 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      const payload = await response.json() as Record<string, unknown> & { error?: string };
-      if (!response.ok) throw new Error(payload.error || 'The AI service could not respond.');
+      let payload: Record<string, unknown> & { error?: string; code?: AiErrorCode; retryable?: boolean };
+      try {
+        payload = await response.json() as Record<string, unknown> & { error?: string; code?: AiErrorCode; retryable?: boolean };
+      } catch {
+        throw createAiError('The AI service returned an unreadable response. Try again shortly.', 'service', true);
+      }
+      if (!response.ok) throw createAiError(payload.error || 'The AI service could not respond.', payload.code ?? 'service', payload.retryable === true);
       return payload;
     } catch (error) {
       releaseAiUse();
@@ -641,11 +661,13 @@ export function App() {
       setAiLoading(false);
       setAiInsight(null);
       setAiMessages([]);
-      setAiError('AI is turned off. Your dashboard Smart Reads continue to work locally. Enable AI in Data → AI preferences when you want a Gemini second opinion.');
+      setAiError('');
+      setAiErrorCode('disabled');
       return;
     }
     setAiLoading(true);
     setAiError('');
+    setAiErrorCode('unknown');
     setAiInsight(null);
     setAiMessages([]);
     setAiFailedQuestion('');
@@ -653,7 +675,9 @@ export function App() {
       const payload = await requestAi({ mode: 'insight', snapshot: buildSnapshot() });
       setAiInsight(payload as unknown as AiInsight);
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
+      const details = classifyAiError(error);
+      setAiError(details.message);
+      setAiErrorCode(details.code);
     } finally {
       setAiLoading(false);
     }
@@ -661,7 +685,8 @@ export function App() {
 
   async function sendFollowUp(question: string, appendUser: boolean) {
     if (!aiEnabled) {
-      setAiError('AI is turned off. Enable it in Data → AI preferences before asking a follow-up question.');
+      setAiError('');
+      setAiErrorCode('disabled');
       return;
     }
     const trimmed = question.trim().slice(0, 400);
@@ -674,14 +699,17 @@ export function App() {
       .map(({ role, text }) => ({ role, text }));
     setAiAsking(true);
     setAiError('');
+    setAiErrorCode('unknown');
     setAiFailedQuestion('');
     try {
       const payload = await requestAi({ mode: 'chat', question: trimmed, history, snapshot: buildSnapshot() });
       const answer = typeof payload.answer === 'string' ? payload.answer : '';
-      if (!answer) throw new Error('The AI service returned an empty answer.');
+      if (!answer) throw createAiError('The AI service returned an empty answer. Try again shortly.', 'response_invalid', true);
       setAiMessages((current) => [...current, { id: makeId(), role: 'assistant', text: answer }]);
     } catch (error) {
-      setAiError(error instanceof Error ? error.message : 'The AI service could not respond.');
+      const details = classifyAiError(error);
+      setAiError(details.message);
+      setAiErrorCode(details.code);
       setAiFailedQuestion(trimmed);
     } finally {
       setAiAsking(false);
@@ -770,7 +798,7 @@ export function App() {
 
       <PwaInstallPrompt />
 
-      {!showAi && <button className="ai-fab" onClick={() => { if (!aiEnabled) { setShowAi(true); setAiError('AI is turned off. Your dashboard Smart Reads continue to work locally. Enable AI in Data → AI preferences when you want a Gemini second opinion.'); return; } void runAiInsights(); }} aria-label="Open Budgital AI chatbot"><Bot size={19} /><span>Ask AI</span></button>}
+      {!showAi && <button className="ai-fab" onClick={() => { if (!aiEnabled) { setShowAi(true); setAiError(''); setAiErrorCode('disabled'); return; } void runAiInsights(); }} aria-label="Open Budgital AI chatbot"><Bot size={19} /><span>Ask AI</span></button>}
       <BackToTop />
 
       {showRange && <DateRangeSheet range={range} preset={preset} anchor={anchor} custom={customRange} onSelect={(nextPreset) => { setPreset(nextPreset); setShowRange(false); }} onCustom={(custom) => { setCustomRange(custom); setPreset('custom'); }} onShift={shiftAnchor} onClose={() => setShowRange(false)} />}
@@ -779,7 +807,7 @@ export function App() {
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showFeedback && <AppFeedbackModal feedback={feedback} setFeedback={setFeedback} status={feedbackStatus} onSent={() => setFeedbackStatus('sent')} onLocal={() => setFeedbackStatus('local')} onClose={() => { setShowFeedback(false); setFeedbackStatus('idle'); }} />}
       {showLegal && <AppLegalModal onClose={() => setShowLegal(false)} />}
-      {showAi && <AiConversation enabled={aiEnabled} loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
+      {showAi && <AiConversation enabled={aiEnabled} loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} errorCode={aiErrorCode} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
 }
@@ -1131,9 +1159,11 @@ function TabBar({ view, onNavigate, onAdd }: { view: View; onNavigate: (view: Vi
   </nav>;
 }
 
-function AiConversation({ enabled, loading, insight, messages, asking, error, range, failedQuestion, aiRemaining, onClose, onRetry, onRetryFollowUp, onAsk }: { enabled: boolean; loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; range: DateRange; failedQuestion: string; aiRemaining: number; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
+function AiConversation({ enabled, loading, insight, messages, asking, error, errorCode, range, failedQuestion, aiRemaining, onClose, onRetry, onRetryFollowUp, onAsk }: { enabled: boolean; loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; errorCode: AiErrorCode; range: DateRange; failedQuestion: string; aiRemaining: number; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
   const [draft, setDraft] = useState('');
   const suggestions = ['Why is my biggest category so high?', 'Which category grew fastest?', 'How can I free up $200 next month?'];
+  const errorTitles: Record<AiErrorCode, string> = { disabled: 'Local-only mode is active', daily_limit: 'Daily AI limit reached', not_configured: 'AI setup is incomplete', invalid_key: 'Gemini authentication failed', rate_limit: 'Gemini free-tier limit reached', busy: 'Gemini is busy right now', network: 'Connection problem', validation: 'The AI request needs attention', response_invalid: 'Gemini returned an unusable response', service: 'AI service unavailable', unknown: 'AI request failed' };
+  const canRetry = ['network', 'rate_limit', 'busy', 'response_invalid', 'service', 'unknown'].includes(errorCode);
   const submit = (question: string) => {
     if (!question.trim() || asking) return;
     setDraft('');
@@ -1156,7 +1186,7 @@ function AiConversation({ enabled, loading, insight, messages, asking, error, ra
           {messages.map((message) => <div key={message.id} className={`ai-bubble ${message.role === 'user' ? 'user' : 'bot'}`}>{message.text}</div>)}
           {asking && <div className="ai-typing"><i /><i /><i /></div>}
         </div>}
-        {error && <div className="ai-error" role="alert"><strong>AI is unavailable right now</strong><p>{error}</p><div className="ai-error-actions">{failedQuestion && <button className="secondary-button" onClick={onRetryFollowUp}>Retry that question</button>}<button className="secondary-button" onClick={onRetry}>Refresh read</button></div></div>}
+        {error && errorCode !== 'disabled' && <div className="ai-error" role="alert"><strong>{errorTitles[errorCode]}</strong><p>{error}</p>{canRetry && <div className="ai-error-actions">{failedQuestion && <button className="secondary-button" onClick={onRetryFollowUp}>Retry that question</button>}<button className="secondary-button" onClick={onRetry}>Try again</button></div>}</div>}
         {enabled && insight && <div className="ai-suggestions">{suggestions.map((suggestion) => <button key={suggestion} onClick={() => submit(suggestion)}>{suggestion}</button>)}</div>}
         {enabled && <div className="ai-composer">
           <input value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') submit(draft); }} placeholder="Ask a follow-up question…" aria-label="Ask a follow-up question" />

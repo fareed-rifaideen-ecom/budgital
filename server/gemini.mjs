@@ -138,25 +138,25 @@ function fxPrompt(from, to) {
 
 function upstreamError(status, responseBody) {
   const detail = cleanText(responseBody?.error?.message, 180);
-  if (status === 400) return { status: 502, error: detail ? `Gemini rejected the request: ${detail}` : 'Gemini rejected the request. Check the Netlify model and API-key settings.' };
-  if (status === 401 || status === 403) return { status: 502, error: 'The Gemini API key is missing or invalid in Netlify.' };
-  if (status === 429) return { status: 429, error: 'Gemini free-tier limit reached. Try again later.' };
-  if (status === 503) return { status: 503, error: 'Gemini is busy right now. Try again in a moment.' };
-  return { status: 502, error: detail ? `Gemini could not complete this request: ${detail}` : 'Gemini could not complete this request. Check the Netlify function configuration.' };
+  if (status === 400) return { status: 502, code: 'validation', retryable: false, error: detail ? `Gemini rejected the request: ${detail}` : 'Gemini rejected the request. Check the Netlify model and API-key settings.' };
+  if (status === 401 || status === 403) return { status: 502, code: 'invalid_key', retryable: false, error: 'The Gemini API key is missing or invalid in Netlify.' };
+  if (status === 429) return { status: 429, code: 'rate_limit', retryable: true, error: 'Gemini free-tier limit reached. Try again later.' };
+  if (status === 503) return { status: 503, code: 'busy', retryable: true, error: 'Gemini is busy right now. Try again in a moment.' };
+  return { status: 502, code: 'service', retryable: true, error: detail ? `Gemini could not complete this request: ${detail}` : 'Gemini could not complete this request. Check the Netlify function configuration.' };
 }
 
 export async function handleGeminiRequest(req, res) {
-  if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed.' });
-  if (!process.env.GEMINI_API_KEY) return sendJson(res, 503, { error: 'Gemini is not configured yet.' });
+  if (req.method !== 'POST') return sendJson(res, 405, { code: 'method_not_allowed', retryable: false, error: 'Method not allowed.' });
+  if (!process.env.GEMINI_API_KEY) return sendJson(res, 503, { code: 'not_configured', retryable: false, error: 'Gemini is not configured yet. Add GEMINI_API_KEY to the Netlify function environment.' });
   let payload;
   try {
     payload = await readJson(req);
   } catch (error) {
-    return sendJson(res, 400, { error: error instanceof Error ? error.message : 'Invalid request.' });
+    return sendJson(res, 400, { code: 'validation', retryable: false, error: error instanceof Error ? error.message : 'Invalid request.' });
   }
   try {
     const mode = payload?.mode === 'chat' ? 'chat' : payload?.mode === 'fx' ? 'fx' : 'insight';
-    if (!consumeDailyUsage(req)) return sendJson(res, 429, { error: `Daily AI limit reached (${DAILY_AI_LIMIT} requests). Try again tomorrow.` });
+    if (!consumeDailyUsage(req)) return sendJson(res, 429, { code: 'daily_limit', retryable: false, error: `Daily AI limit reached (${DAILY_AI_LIMIT} requests). Try again tomorrow.` });
     if (mode === 'fx') {
       const from = validateCurrency(payload?.from);
       const to = validateCurrency(payload?.to);
@@ -166,7 +166,7 @@ export async function handleGeminiRequest(req, res) {
         contents: [{ role: 'user', parts: [{ text: fxPrompt(from, to) }] }],
         generationConfig: { temperature: 0.1, maxOutputTokens: 160, responseMimeType: 'application/json', responseSchema: { type: 'OBJECT', properties: { rate: { type: 'NUMBER' }, confidence: { type: 'STRING' }, note: { type: 'STRING' } }, required: ['rate', 'confidence', 'note'] } },
       });
-      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
+      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { code: failure.code, retryable: failure.retryable, error: failure.error }); }
       let parsed;
       try { parsed = JSON.parse(responseBody?.candidates?.[0]?.content?.parts?.[0]?.text || '{}'); } catch { throw new Error('Gemini returned an unreadable exchange rate.'); }
       const rate = Number(parsed.rate);
@@ -187,7 +187,7 @@ export async function handleGeminiRequest(req, res) {
         ],
         generationConfig: { temperature: 0.4, maxOutputTokens: 420 },
       });
-      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
+      if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { code: failure.code, retryable: failure.retryable, error: failure.error }); }
       const answer = cleanText(
         (responseBody?.candidates?.[0]?.content?.parts || []).map((part) => part?.text || '').join(' ').trim(),
         900,
@@ -210,7 +210,7 @@ export async function handleGeminiRequest(req, res) {
         },
       },
     });
-    if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { error: failure.error }); }
+    if (!ok) { const failure = upstreamError(status, responseBody); return sendJson(res, failure.status, { code: failure.code, retryable: failure.retryable, error: failure.error }); }
     const text = responseBody?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     let parsed;
     try {
@@ -224,6 +224,10 @@ export async function handleGeminiRequest(req, res) {
       nextStep: cleanText(parsed.nextStep, 170) || 'Keep logging consistently so the next read has a stronger baseline.',
     });
   } catch (error) {
-    return sendJson(res, 400, { error: error instanceof Error ? error.message : 'Unable to analyze this snapshot.' });
+    const message = error instanceof Error ? error.message : 'Unable to analyze this snapshot.';
+    const responseInvalid = message.startsWith('Gemini returned');
+    const upstreamUnavailable = error instanceof TypeError || /fetch failed|network/i.test(message);
+    const code = upstreamUnavailable ? 'service' : responseInvalid ? 'response_invalid' : 'validation';
+    return sendJson(res, upstreamUnavailable || responseInvalid ? 502 : 400, { code, retryable: upstreamUnavailable || responseInvalid, error: upstreamUnavailable ? 'The Gemini service could not be reached. Try again shortly.' : message });
   }
 }
