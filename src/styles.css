@@ -1164,3 +1164,31 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .theme-switch[data-active='dark'] .theme-thumb { right: 3px !important; left: auto !important; }
   .terms-card { width: min(100% - 24px, 460px); padding: 24px 18px; }
 }
+
+
+/* Pilot hardening: AI preferences, storage visibility, and import conflict cues */
+.ai-settings-panel { margin-top: 15px; padding: 18px 21px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; }
+.ai-settings-panel > div:nth-child(2) { min-width: 0; }
+.ai-settings-panel h2, .storage-panel h2 { font-size: 11px; }
+.ai-settings-panel p, .storage-panel p { color: var(--t3); font-size: 9px; line-height: 1.55; margin-top: 4px; }
+.ai-toggle { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: var(--ink); font-size: 10px; font-weight: 800; }
+.ai-toggle input { accent-color: var(--accent-text); width: 16px; height: 16px; }
+.ai-settings-panel .format-note { grid-column: 2 / -1; margin-top: 0; }
+.storage-panel { margin-top: 15px; padding: 18px 21px; display: flex; align-items: flex-start; gap: 12px; }
+.storage-panel > div:nth-child(2) { flex: 1; min-width: 0; }
+.storage-panel small { display: block; color: var(--t3); font-size: 9px; margin-top: 8px; }
+.storage-meter { height: 6px; margin-top: 11px; overflow: hidden; border-radius: 99px; background: var(--track); }
+.storage-meter span { display: block; height: 100%; border-radius: inherit; background: var(--accent-text); }
+.ai-disabled { margin-top: 16px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-3); }
+.ai-disabled strong { font-size: 12px; }
+.ai-disabled p { margin-top: 6px; color: var(--t3); font-size: 10px; line-height: 1.55; }
+.status-pill.warning { color: var(--warn-text); }
+.duplicate-choice { display: grid; gap: 8px; margin-top: 17px; padding: 12px 13px; border: 1px solid var(--warn-line); border-radius: 11px; background: var(--warn-soft); color: var(--warn-text); font-size: 10px; }
+.duplicate-choice strong { color: var(--ink); font-size: 11px; }
+.duplicate-choice label { display: inline-flex; align-items: center; gap: 7px; }
+.duplicate-choice input { accent-color: var(--accent-text); }
+@media (max-width: 640px) {
+  .ai-settings-panel { grid-template-columns: auto 1fr; }
+  .ai-settings-panel .ai-toggle { grid-column: 2; justify-self: start; }
+  .ai-settings-panel .format-note { grid-column: 1 / -1; }
+}
