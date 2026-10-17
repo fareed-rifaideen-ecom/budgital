@@ -20,6 +20,7 @@ export function BudScroll() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [videoFailed, setVideoFailed] = useState(false);
   const [reducedMotion] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  const [isMobile] = useState(() => window.matchMedia('(max-width: 900px)').matches);
   // Pick the right encode up front: setting `src` directly avoids
   // <source media> selection quirks and keeps the fallback logic simple.
   const [source] = useState(() => (window.matchMedia('(max-width: 900px)').matches
@@ -33,7 +34,7 @@ export function BudScroll() {
 
     const video = videoRef.current;
     // Reduced motion (or no video support) keeps the static transparent mascot.
-    if (reducedMotion || !video || videoFailed) return;
+    if (reducedMotion || isMobile || !video || videoFailed) return;
 
     let disposed = false;
     let cleanup: (() => void) | undefined;
@@ -133,13 +134,13 @@ export function BudScroll() {
       video.removeEventListener('loadedmetadata', start);
       cleanup?.();
     };
-  }, [reducedMotion, videoFailed]);
+  }, [isMobile, reducedMotion, videoFailed]);
 
-  const isStatic = videoFailed || reducedMotion;
+  const isStatic = videoFailed || reducedMotion || isMobile;
 
   return <div className={`bud-rail ${isStatic ? 'is-static' : 'is-live'}`} ref={railRef} aria-hidden="true">
     <div className="bud-rail-drift" ref={driftRef}>
-    {videoFailed || reducedMotion
+    {videoFailed || reducedMotion || isMobile
       ? <img className="bud-mascot bud-mascot-static" src="/bud-mascot.png" srcSet="/bud-mascot-small.png 200w, /bud-mascot.png 360w" sizes="(max-width: 900px) 172px, 262px" alt="" decoding="async" draggable={false} />
       : <video
         className="bud-mascot"
