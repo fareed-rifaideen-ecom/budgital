@@ -26,20 +26,15 @@
       })();
     </script>
     <style>
-      html, body { margin: 0; min-height: 100%; background: #0d1714; }
-      .boot-screen { min-height: 100vh; display: grid; place-items: center; align-content: center; gap: 9px; position: relative; overflow: hidden; background: #0d1714; color: #f4f7f1; font: 500 16px/1.35 Inter, ui-sans-serif, system-ui, sans-serif; text-align: center; }
-      .boot-screen strong { font-size: 30px; letter-spacing: -.055em; }
-      .boot-screen span { color: #9aaea5; font-size: 13px; }
-      .boot-screen small { position: absolute; bottom: 28px; color: #91a39b; font-size: 11px; }
-      .boot-tile { width: 68px; height: 68px; display: grid; place-items: center; border-radius: 21px; background: linear-gradient(135deg,#c8ee68,#a9df3d); color: #12251d; font-size: 36px; font-weight: 800; box-shadow: 0 18px 45px rgba(200,238,104,.2); animation: boot-pulse 1.7s ease-in-out infinite; }
-      .boot-screen i { width: 110px; height: 3px; border-radius: 99px; background: linear-gradient(90deg,transparent,#c8ee68,transparent); animation: boot-load 1.2s ease-in-out infinite; }
-      .boot-orbit { position: absolute; border: 1px solid rgba(200,238,104,.22); border-radius: 50%; pointer-events: none; animation: boot-spin 7s linear infinite; }
-      .boot-orbit-one { width: 260px; height: 260px; }.boot-orbit-two { width: 430px; height: 430px; border-style: dashed; animation-direction: reverse; }
-      @keyframes boot-pulse { 50% { transform: translateY(-4px) scale(1.04); } }
-      @keyframes boot-load { 50% { opacity: .45; transform: scaleX(.55); } }
-      @keyframes boot-spin { to { transform: rotate(360deg); } }
+      html, body { margin: 0; min-height: 100%; background: #f5f6f1; }
+      .route-shell { min-height: 100vh; box-sizing: border-box; display: grid; place-content: center; justify-items: start; gap: 10px; padding: 28px; background: #f5f6f1; color: #12251d; font: 500 16px/1.35 Inter, ui-sans-serif, system-ui, sans-serif; }
+      .route-shell-mark { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 12px; border-radius: 14px 14px 14px 4px; background: #16352c; color: #c8ee68; font-size: 22px; font-weight: 900; }
+      .route-shell-kicker { margin: 0; color: #557067; font-size: 11px; font-weight: 850; letter-spacing: .14em; text-transform: uppercase; }
+      .route-shell h1 { max-width: 520px; margin: 0; font-size: clamp(32px, 8vw, 58px); line-height: .98; letter-spacing: -.07em; }
+      .route-shell p:last-child { margin: 4px 0 0; color: #667870; font-size: 14px; }
+      .route-shell-app { background: #f5f6f1; }
+      @media (prefers-color-scheme: dark) { html:not([data-theme="light"]), html[data-theme="dark"] { background: #0d1714; } html:not([data-theme="light"]) .route-shell, html[data-theme="dark"] .route-shell { background: #0d1714; color: #eff7ee; } html:not([data-theme="light"]) .route-shell-mark, html[data-theme="dark"] .route-shell-mark { background: #c8ee68; color: #12251d; } html:not([data-theme="light"]) .route-shell-kicker, html[data-theme="dark"] .route-shell-kicker { color: #b6c9bd; } html:not([data-theme="light"]) .route-shell p:last-child, html[data-theme="dark"] .route-shell p:last-child { color: #9aaea5; } }
       @media (prefers-color-scheme: light) { html[data-theme="light"] body, html[data-theme="light"] .boot-screen { background: #f5f6f1; color: #12251d; } html[data-theme="light"] .boot-screen span, html[data-theme="light"] .boot-screen small { color: #667870; } }
-      @media (prefers-reduced-motion: reduce) { .boot-screen *, .boot-screen::before { animation: none !important; } }
     </style>
     <meta name="description" content="Budgital is a private, browser-first personal budget app for tracking income, expenses, category budgets, insights, and portable CSV backups." />
     <meta name="keywords" content="Budgital, private budget app, personal budget app, monthly budget planner, expense tracker, local budget app, CSV budget import, AI budget insights" />
@@ -59,7 +54,18 @@
     <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Budgital","applicationCategory":"FinanceApplication","operatingSystem":"Web browser","isAccessibleForFree":true,"description":"A private browser-local budget app for monthly budgets, expense tracking, CSV import, and optional aggregate-only AI insights.","author":{"@type":"Person","name":"Fareed M. Rifaideen","url":"https://fareed-rifaideen.netlify.app/"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   </head>
   <body>
-    <div id="root"><div class="boot-screen" role="status" aria-label="Loading Budgital"><div class="boot-orbit boot-orbit-one"></div><div class="boot-orbit boot-orbit-two"></div><div class="boot-tile">B</div><strong>Budgital</strong><span>Money, made clear.</span><i></i><small>Lumina Metrics by FMR · Created by Fareed M. Rifaideen</small></div></div>
+    <div id="root"><div class="route-shell" role="status" aria-label="Loading Budgital"><div class="route-shell-mark" aria-hidden="true">B</div><p class="route-shell-kicker">Budgital</p><h1>Money, made clear.</h1><p>A calmer way to budget, right in your browser.</p></div></div>
+    <script>
+      (function () {
+        if (!/^\/app(?:\/|$)/.test(window.location.pathname)) return;
+        var shell = document.querySelector('.route-shell');
+        var heading = shell && shell.querySelector('h1');
+        var message = shell && shell.querySelector('p:last-child');
+        if (shell) shell.classList.add('route-shell-app');
+        if (heading) heading.textContent = 'Your money, in plain English.';
+        if (message) message.textContent = 'Opening your private browser workspace…';
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

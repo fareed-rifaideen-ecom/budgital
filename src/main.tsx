@@ -1,24 +1,29 @@
 import React, { lazy, Suspense } from 'react';
-import { SplashScreen } from './SplashScreen';
 import { createRoot } from 'react-dom/client';
 import { registerPwa } from './pwa';
 import './styles.css';
 
-const App = lazy(() => import('./App').then((module) => ({ default: module.App })));
-const LandingPage = lazy(() => import('./LandingPage').then((module) => ({ default: module.LandingPage })));
 const isAppRoute = window.location.pathname === '/app' || window.location.pathname.startsWith('/app/');
+const routeModule = isAppRoute ? import('./App') : import('./LandingPage');
+const Route = lazy(() => routeModule.then((module: any) => ({
+  default: isAppRoute ? module.App : module.LandingPage,
+})));
 
 registerPwa();
 
 function RouteLoading() {
-  const theme = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
-  return <SplashScreen theme={theme} onFinish={() => undefined} duration={999999} />;
+  return <div className={`route-shell ${isAppRoute ? 'route-shell-app' : 'route-shell-home'}`} role="status" aria-live="polite" aria-label="Loading Budgital">
+    <div className="route-shell-mark" aria-hidden="true">B</div>
+    <p className="route-shell-kicker">Budgital</p>
+    <h1>{isAppRoute ? 'Your money, in plain English.' : 'Money, made clear.'}</h1>
+    <p>{isAppRoute ? 'Opening your private browser workspace…' : 'A calmer way to budget, right in your browser.'}</p>
+  </div>;
 }
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <Suspense fallback={<RouteLoading />}>
-      {isAppRoute ? <App /> : <LandingPage />}
+      <Route />
     </Suspense>
   </React.StrictMode>,
 );
