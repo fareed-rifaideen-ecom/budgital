@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
-import { BudScroll } from './BudScroll';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { PwaInstallPrompt } from './PwaInstallPrompt';
 import { submitFeedback } from './feedback';
 import { ArrowRight, ArrowUp, BarChart3, Check, ChevronDown, ChevronLeft, ChevronRight, Coffee, Code2, Globe2, BriefcaseBusiness, FileText, MessageSquare, Moon, Scale, Send, ShieldAlert, ShieldCheck, Sparkles, Sun, WalletCards, X, Zap } from 'lucide-react';
@@ -10,6 +9,7 @@ const LIGHT_MARK = '/budgital-mark-light.svg';
 const DARK_MARK = '/budgital-mark-dark.svg';
 const LIGHT_FALLBACK = '/logo.svg';
 const DARK_FALLBACK = '/budgital-mark-dark.svg';
+const BudScroll = lazy(() => import('./BudScroll').then(({ BudScroll: Component }) => ({ default: Component })));
 
 function getTheme(): LandingTheme {
   try {
@@ -51,6 +51,7 @@ export function LandingPage() {
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sent' | 'local'>('idle');
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
   const [activeShot, setActiveShot] = useState(0);
+  const [mascotReady, setMascotReady] = useState(false);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -59,6 +60,17 @@ export function LandingPage() {
     document.querySelector('meta[name="robots"]')?.setAttribute('content', 'index,follow');
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme }));
   }, [theme]);
+
+  useEffect(() => {
+    const win = window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
+    const start = () => setMascotReady(true);
+    if (win.requestIdleCallback) {
+      const id = win.requestIdleCallback(start, { timeout: 1400 });
+      return () => win.cancelIdleCallback?.(id);
+    }
+    const id = window.setTimeout(start, 1200);
+    return () => window.clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     const nodes = Array.from(document.querySelectorAll<HTMLElement>('[data-reveal]'));
@@ -75,7 +87,7 @@ export function LandingPage() {
   const mark = theme === 'dark' ? DARK_MARK : LIGHT_MARK;
   const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  return <div className="landing-page"><span className="scroll-matter" aria-hidden="true" /><BudScroll /><PwaInstallPrompt />
+  return <div className="landing-page"><span className="scroll-matter" aria-hidden="true" />{mascotReady && <Suspense fallback={null}><BudScroll /></Suspense>}<PwaInstallPrompt />
     <header className={`landing-nav ${scrolled ? 'is-scrolled' : ''}`}>
       <a className="landing-brand" href="/" aria-label="Budgital home"><span className="brand-mark"><img src={mark} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></span><span><strong>Budgital</strong><small>Money, made clear.</small></span></a>
       <nav className="landing-links" aria-label="Landing page navigation"><a href="#difference">Why Budgital</a><a href="#privacy">Privacy</a><a href="#faq">FAQ</a><button onClick={() => setFeedbackOpen(true)}>Feedback</button></nav>
