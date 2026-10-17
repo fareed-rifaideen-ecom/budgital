@@ -550,6 +550,7 @@ html[data-theme='dark'] { color-scheme: dark; }
 .landing-page .brand-mark { width: 38px; height: 38px; border-radius: 12px 12px 12px 4px; background: var(--solid); }
 [data-reveal] { opacity: 0; transform: translateY(22px); transition: opacity .7s ease, transform .7s cubic-bezier(.2,.7,.2,1); }
 [data-reveal].is-visible { opacity: 1; transform: translateY(0); }
+.landing-hero[data-reveal] { opacity: 1; transform: none; }
 .landing-hero[data-reveal] { transition-delay: .08s; }
 .trust-strip[data-reveal] { transition-delay: .12s; }
 .author-title { display: inline-block; padding: 0; background: transparent; color: var(--ink); font-size: clamp(23px, 3vw, 34px); font-weight: 800; letter-spacing: -1.2px; text-align: left; }
