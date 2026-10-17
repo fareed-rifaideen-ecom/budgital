@@ -51,6 +51,7 @@ export function LandingPage() {
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sent' | 'local'>('idle');
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
   const [activeShot, setActiveShot] = useState(0);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 900px)').matches);
   const [mascotReady, setMascotReady] = useState(false);
 
   useEffect(() => {
@@ -60,6 +61,13 @@ export function LandingPage() {
     document.querySelector('meta[name="robots"]')?.setAttribute('content', 'index,follow');
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ theme }));
   }, [theme]);
+
+  useEffect(() => {
+    const media = window.matchMedia('(max-width: 900px)');
+    const onMediaChange = () => setIsMobile(media.matches);
+    media.addEventListener?.('change', onMediaChange);
+    return () => media.removeEventListener?.('change', onMediaChange);
+  }, []);
 
   useEffect(() => {
     const win = window as Window & { requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number; cancelIdleCallback?: (id: number) => void };
@@ -87,7 +95,7 @@ export function LandingPage() {
   const mark = theme === 'dark' ? DARK_MARK : LIGHT_MARK;
   const scrollTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
-  return <div className="landing-page"><span className="scroll-matter" aria-hidden="true" />{mascotReady && <Suspense fallback={null}><BudScroll /></Suspense>}<PwaInstallPrompt />
+  return <div className="landing-page"><span className="scroll-matter" aria-hidden="true" />{mascotReady && !isMobile && <Suspense fallback={null}><BudScroll /></Suspense>}<PwaInstallPrompt />
     <header className={`landing-nav ${scrolled ? 'is-scrolled' : ''}`}>
       <a className="landing-brand" href="/" aria-label="Budgital home"><span className="brand-mark"><img src={mark} onError={(event) => { event.currentTarget.src = theme === 'dark' ? DARK_FALLBACK : LIGHT_FALLBACK; }} alt="" /></span><span><strong>Budgital</strong><small>Money, made clear.</small></span></a>
       <nav className="landing-links" aria-label="Landing page navigation"><a href="#difference">Why Budgital</a><a href="#privacy">Privacy</a><a href="#faq">FAQ</a><button onClick={() => setFeedbackOpen(true)}>Feedback</button></nav>
