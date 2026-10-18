@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties } from 'react';
 import {
   ArrowDownLeft,
   ArrowUp,
@@ -268,10 +268,11 @@ function speechRecognitionConstructor() {
 }
 
 function parseEntryAmount(text: string) {
-  const values = Array.from(text.matchAll(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*(\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi))
+  const withoutDates = text.replace(/\b20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/gi, ' ');
+  const values = Array.from(withoutDates.matchAll(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*(\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi))
     .map((match) => Number(match[1].replace(/[ ,]/g, '')))
     .filter((value) => Number.isFinite(value) && value > 0);
-  return values.length ? values[values.length - 1] : null;
+  return values.length ? values[0] : null;
 }
 
 function parseEntryDate(text: string) {
@@ -307,7 +308,7 @@ function parseEntryCategory(text: string, categories: Category[], type: Transact
 }
 
 function parseEntryDescription(text: string, amount: number | null) {
-  return text.replace(/\b(spent|spend|paid|pay|bought|buy|earned|received|income|salary|refund|deposit|credited|today|yesterday|tomorrow)\b/gi, '')
+  return text.replace(/\b(spent|spend|paid|pay|bought|buy|earned|received|income|salary|refund|deposit|credited|today|yesterday|tomorrow|on|for|total|amount|receipt|invoice)\b/gi, '')
     .replace(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/gi, '')
     .replace(/\b(AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY)\b/gi, '')
     .replace(/\b(20\d{2})[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/gi, '')
@@ -1074,6 +1075,7 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
   const [captureText, setCaptureText] = useState('');
   const [voiceListening, setVoiceListening] = useState(false);
   const receiptInput = useRef<HTMLInputElement>(null);
+  const cameraInput = useRef<HTMLInputElement>(null);
   const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
   useEffect(() => { if (!available.some((category) => category.id === categoryId)) setCategoryId(available[0]?.id ?? ''); }, [type]);
@@ -1097,13 +1099,35 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
     setCaptureText('');
     try {
       const { createWorker } = await import('tesseract.js');
+      const bitmap = await createImageBitmap(file);
+      const maxSide = 1800;
+      const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('The browser could not prepare this image.');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
       const worker = await createWorker('eng');
-      const result = await worker.recognize(file);
+      const result = await worker.recognize(canvas);
       await worker.terminate();
       applyCapturedText(result.data.text, 'receipt');
     } catch (error) {
-      setCaptureStatus(error instanceof Error ? `Receipt reading failed: ${error.message}` : 'Receipt reading failed. You can still enter the fields manually.');
+      const detail = error instanceof Error ? error.message.toLowerCase() : '';
+      const guidance = detail.includes('decode') || detail.includes('image') || detail.includes('bitmap')
+        ? 'Use a clear JPG or PNG photo with the receipt fully visible.'
+        : 'Try a brighter, closer photo or enter the fields manually.';
+      setCaptureStatus(`Receipt reading failed. ${guidance}`);
     }
+  }
+
+  function handleReceiptFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (file) void readReceipt(file);
+    event.target.value = '';
   }
 
   function toggleVoice() {
@@ -1119,16 +1143,31 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
       const transcript = Array.from(result.results ?? []).map((item) => item?.[0]?.transcript ?? '').join(' ').trim();
       if (transcript) applyCapturedText(transcript, 'voice');
     };
-    recognition.onerror = (event) => { setCaptureStatus(`Voice entry stopped: ${event.error ?? 'browser speech recognition error'}.`); setVoiceListening(false); };
+    recognition.onerror = (event) => {
+      const error = event.error ?? 'browser speech recognition error';
+      const message = error === 'not-allowed' || error === 'service-not-allowed'
+        ? 'Microphone permission is blocked. Allow microphone access for budgital.netlify.app in your browser site settings, then tap Voice entry again.'
+        : error === 'audio-capture'
+          ? 'No microphone was available. Check the phone microphone permission and try again.'
+          : `Voice entry stopped: ${error}.`;
+      setCaptureStatus(message);
+      setVoiceListening(false);
+    };
     recognition.onend = () => { setVoiceListening(false); recognitionRef.current = null; };
     recognitionRef.current = recognition;
     setCaptureText('');
     setCaptureStatus('Listening… say, for example, “spent 25 AED on lunch”.');
     setVoiceListening(true);
-    recognition.start();
+    try {
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setVoiceListening(false);
+      setCaptureStatus('Microphone permission could not be requested. Allow microphone access for budgital.netlify.app in your browser site settings, then tap Voice entry again.');
+    }
   }
 
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="capture-tools"><button className="secondary-button small" type="button" onClick={() => receiptInput.current?.click()} disabled={captureStatus === 'Reading the receipt locally…'}><Camera size={15} /> Scan receipt</button><input ref={receiptInput} className="sr-only" type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readReceipt(file); event.target.value = ''; }} /><button className={`secondary-button small ${voiceListening ? 'capture-active' : ''}`} type="button" onClick={toggleVoice}><Mic size={15} /> {voiceListening ? 'Stop listening' : 'Voice entry'}</button></div>{captureStatus && <div className="capture-status" role="status"><span>{captureStatus}</span>{captureText && <small>Detected text stays in this browser and is only used to fill this draft.</small>}</div>}<div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : Number(fxRate) > 0 ? 'manual rate' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="capture-tools"><button className="secondary-button small" type="button" onClick={() => receiptInput.current?.click()} disabled={captureStatus === 'Reading the receipt locally…'}><FileUp size={15} /> Choose image</button><input ref={receiptInput} className="sr-only" type="file" accept="image/*" onChange={handleReceiptFile} /><button className="secondary-button small" type="button" onClick={() => cameraInput.current?.click()} disabled={captureStatus === 'Reading the receipt locally…'}><Camera size={15} /> Take photo</button><input ref={cameraInput} className="sr-only" type="file" accept="image/*" capture="environment" onChange={handleReceiptFile} /><button className={`secondary-button small ${voiceListening ? 'capture-active' : ''}`} type="button" onClick={toggleVoice}><Mic size={15} /> {voiceListening ? 'Stop listening' : 'Voice entry'}</button></div>{captureStatus && <div className="capture-status" role="status"><span>{captureStatus}</span>{captureText && <small>Detected text stays in this browser and is only used to fill this draft.</small>}</div>}<div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : Number(fxRate) > 0 ? 'manual rate' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
 }
 
 function ClearDataModal({ hasStarterData, onExport, onClose, onConfirm }: { hasStarterData: boolean; onExport: () => void; onClose: () => void; onConfirm: () => void }) {
