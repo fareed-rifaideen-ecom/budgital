@@ -269,10 +269,18 @@ function speechRecognitionConstructor() {
 
 function parseEntryAmount(text: string) {
   const withoutDates = text.replace(/\b20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/gi, ' ');
-  const values = Array.from(withoutDates.matchAll(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*(\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi))
+  const values = Array.from(withoutDates.matchAll(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*(\d+(?:[ ,]\d{3})*(?:\.\d{1,2})?)/gi))
     .map((match) => Number(match[1].replace(/[ ,]/g, '')))
     .filter((value) => Number.isFinite(value) && value > 0);
   return values.length ? values[0] : null;
+}
+
+function parseReceiptAmount(text: string) {
+  const amountPattern = '(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\\s*(\\d+(?:[ ,]\\d{3})*(?:\\.\\d{1,2})?)';
+  const totalMatches = Array.from(text.matchAll(new RegExp(`(?:grand\\s+total|total\\s+(?:due|amount)|amount\\s+due|balance\\s+due|net\\s+total|total)\\s*[:=-]?\\s*${amountPattern}`, 'gi')))
+    .map((match) => Number(match[1].replace(/[ ,]/g, '')))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return totalMatches.length ? totalMatches[totalMatches.length - 1] : parseEntryAmount(text);
 }
 
 function parseEntryDate(text: string) {
@@ -293,6 +301,18 @@ function parseEntryType(text: string): TransactionType {
 function parseEntryCurrency(text: string, fallback: CurrencyCode) {
   const code = text.match(/\b(AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY)\b/i)?.[1]?.toUpperCase();
   if (code && currencyOptions.some((item) => item.code === code)) return code as CurrencyCode;
+  const spokenCurrency: Array<[RegExp, CurrencyCode]> = [
+    [/\b(dirhams?|dh)\b/i, 'AED'],
+    [/\b(riyals?|riyal)\b/i, 'SAR'],
+    [/\b(pesos?)\b/i, 'PHP'],
+    [/\b(sri\s*lankan\s*rupees?|lankan\s*rupees?)\b/i, 'LKR'],
+    [/\b(rupees?)\b/i, 'INR'],
+    [/\b(dollars?)\b/i, 'USD'],
+    [/\b(euros?)\b/i, 'EUR'],
+    [/\b(pounds?)\b/i, 'GBP'],
+  ];
+  const spoken = spokenCurrency.find(([pattern]) => pattern.test(text));
+  if (spoken) return spoken[1];
   const symbolMap: Record<string, CurrencyCode> = { '$': 'USD', '€': 'EUR', '£': 'GBP', '₹': 'INR', '₱': 'PHP' };
   const symbol = Object.keys(symbolMap).find((item) => text.includes(item));
   return symbol ? symbolMap[symbol] : fallback;
@@ -308,7 +328,7 @@ function parseEntryCategory(text: string, categories: Category[], type: Transact
 }
 
 function parseEntryDescription(text: string, amount: number | null) {
-  return text.replace(/\b(spent|spend|paid|pay|bought|buy|earned|received|income|salary|refund|deposit|credited|today|yesterday|tomorrow|on|for|total|amount|receipt|invoice)\b/gi, '')
+  return text.replace(/\b(spent|spend|paid|pay|bought|buy|earned|received|income|salary|refund|deposit|credited|today|yesterday|tomorrow|on|for|total|amount|receipt|invoice|dirhams?|dh|riyals?|pesos?|rupees?|dollars?|euros?|pounds?)\b/gi, '')
     .replace(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/gi, '')
     .replace(/\b(AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY)\b/gi, '')
     .replace(/\b(20\d{2})[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/gi, '')
@@ -1083,7 +1103,7 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
 
   function applyCapturedText(text: string, source: 'receipt' | 'voice') {
     const nextType = parseEntryType(text);
-    const nextAmount = parseEntryAmount(text);
+    const nextAmount = source === 'receipt' ? parseReceiptAmount(text) : parseEntryAmount(text);
     setType(nextType);
     setCurrency(parseEntryCurrency(text, currency));
     if (nextAmount) setAmount(String(nextAmount));
@@ -1098,22 +1118,31 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
     setCaptureStatus('Reading the receipt locally…');
     setCaptureText('');
     try {
-      const { createWorker } = await import('tesseract.js');
+      const { createWorker, PSM } = await import('tesseract.js');
       const bitmap = await createImageBitmap(file);
-      const maxSide = 1800;
-      const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+      const maxSide = 2200;
+      const scale = Math.min(1.5, maxSide / Math.max(bitmap.width, bitmap.height));
       const canvas = document.createElement('canvas');
       canvas.width = Math.max(1, Math.round(bitmap.width * scale));
       canvas.height = Math.max(1, Math.round(bitmap.height * scale));
       const context = canvas.getContext('2d');
       if (!context) throw new Error('The browser could not prepare this image.');
+      context.filter = 'grayscale(1) contrast(1.35)';
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = 'high';
       context.fillStyle = '#ffffff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
       bitmap.close();
       const worker = await createWorker('eng');
+      await worker.setParameters({
+        tessedit_pageseg_mode: PSM.SPARSE_TEXT,
+        preserve_interword_spaces: '1',
+        user_defined_dpi: '300',
+      });
       const result = await worker.recognize(canvas);
       await worker.terminate();
+      if (!result.data.text.trim()) throw new Error('No readable text was found.');
       applyCapturedText(result.data.text, 'receipt');
     } catch (error) {
       const detail = error instanceof Error ? error.message.toLowerCase() : '';
@@ -1135,13 +1164,16 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
     const Recognition = speechRecognitionConstructor();
     if (!Recognition) { setCaptureStatus('Voice entry is not supported in this browser. You can use receipt capture or type the entry manually.'); return; }
     const recognition = new Recognition();
-    recognition.lang = navigator.language || 'en-US';
-    recognition.interimResults = false;
+    recognition.lang = navigator.language?.startsWith('en') ? navigator.language : 'en-US';
+    recognition.interimResults = true;
     recognition.continuous = false;
     recognition.onresult = (event) => {
-      const result = event as { results?: ArrayLike<ArrayLike<{ transcript?: string }>> };
-      const transcript = Array.from(result.results ?? []).map((item) => item?.[0]?.transcript ?? '').join(' ').trim();
-      if (transcript) applyCapturedText(transcript, 'voice');
+      const result = event as { results?: ArrayLike<ArrayLike<{ transcript?: string; isFinal?: boolean }>> };
+      const entries = Array.from(result.results ?? []);
+      const interim = entries.map((item) => item?.[0]?.transcript ?? '').join(' ').trim();
+      const finalText = entries.filter((item) => item?.[0]?.isFinal !== false).map((item) => item?.[0]?.transcript ?? '').join(' ').trim();
+      if (finalText) applyCapturedText(finalText, 'voice');
+      else if (interim) { setCaptureText(interim); setCaptureStatus('Listening… keep speaking, then review the draft before saving.'); }
     };
     recognition.onerror = (event) => {
       const error = event.error ?? 'browser speech recognition error';
@@ -1149,6 +1181,8 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
         ? 'Microphone permission is blocked. Allow microphone access for budgital.netlify.app in your browser site settings, then tap Voice entry again.'
         : error === 'audio-capture'
           ? 'No microphone was available. Check the phone microphone permission and try again.'
+          : error === 'no-speech'
+            ? 'No speech was detected. Move closer to the microphone and try a short phrase.'
           : `Voice entry stopped: ${error}.`;
       setCaptureStatus(message);
       setVoiceListening(false);
