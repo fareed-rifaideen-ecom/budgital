@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleDollarSign,
+  Camera,
   Coffee,
   Download,
   FileText,
@@ -23,6 +24,7 @@ import {
   Landmark,
   Moon,
   MessageSquare,
+  Mic,
   MoreHorizontal,
   Plus,
   Receipt,
@@ -246,6 +248,72 @@ function hasKnownBaseAmount(transaction: Transaction, baseCurrency: CurrencyCode
   return !transaction.currency || transaction.currency === baseCurrency || (Number(transaction.fxRateToBase) > 0);
 }
 function payloadConfidence(payload: Record<string, unknown>) { return typeof payload.confidence === 'string' ? payload.confidence : 'low'; }
+
+type BrowserSpeechRecognition = {
+  lang: string;
+  interimResults: boolean;
+  continuous: boolean;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: unknown) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+function speechRecognitionConstructor() {
+  const browserWindow = window as Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor };
+  return browserWindow.SpeechRecognition ?? browserWindow.webkitSpeechRecognition;
+}
+
+function parseEntryAmount(text: string) {
+  const values = Array.from(text.matchAll(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*(\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?)/gi))
+    .map((match) => Number(match[1].replace(/[ ,]/g, '')))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  return values.length ? values[values.length - 1] : null;
+}
+
+function parseEntryDate(text: string) {
+  const lower = text.toLowerCase();
+  if (lower.includes('yesterday')) return addDays(isoDate(), -1);
+  if (lower.includes('tomorrow')) return addDays(isoDate(), 1);
+  const iso = text.match(/\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/);
+  if (iso) return `${iso[1]}-${pad2(Number(iso[2]))}-${pad2(Number(iso[3]))}`;
+  const dayFirst = text.match(/\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})\b/);
+  if (dayFirst) return `${dayFirst[3]}-${pad2(Number(dayFirst[2]))}-${pad2(Number(dayFirst[1]))}`;
+  return isoDate();
+}
+
+function parseEntryType(text: string): TransactionType {
+  return /\b(earned|received|income|salary|refund|deposit|credited)\b/i.test(text) ? 'income' : 'expense';
+}
+
+function parseEntryCurrency(text: string, fallback: CurrencyCode) {
+  const code = text.match(/\b(AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY)\b/i)?.[1]?.toUpperCase();
+  if (code && currencyOptions.some((item) => item.code === code)) return code as CurrencyCode;
+  const symbolMap: Record<string, CurrencyCode> = { '$': 'USD', '€': 'EUR', '£': 'GBP', '₹': 'INR', '₱': 'PHP' };
+  const symbol = Object.keys(symbolMap).find((item) => text.includes(item));
+  return symbol ? symbolMap[symbol] : fallback;
+}
+
+function parseEntryCategory(text: string, categories: Category[], type: TransactionType) {
+  const lower = text.toLowerCase();
+  const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
+  return available.find((category) => lower.includes(category.name.toLowerCase()))?.id
+    ?? available.find((category) => (category.name.toLowerCase() === 'dining' && /restaurant|lunch|dinner|coffee|cafe|meal/.test(lower)) || (category.name.toLowerCase() === 'transport' && /taxi|uber|bus|train|fuel|metro/.test(lower)) || (category.name.toLowerCase() === 'groceries' && /grocery|groceries|supermarket|market/.test(lower)))?.id
+    ?? available[0]?.id
+    ?? '';
+}
+
+function parseEntryDescription(text: string, amount: number | null) {
+  return text.replace(/\b(spent|spend|paid|pay|bought|buy|earned|received|income|salary|refund|deposit|credited|today|yesterday|tomorrow)\b/gi, '')
+    .replace(/(?:AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY|[$€£₹₱])?\s*\d{1,3}(?:[ ,]\d{3})*(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?/gi, '')
+    .replace(/\b(AED|SAR|PHP|LKR|USD|EUR|GBP|INR|AUD|CAD|JPY)\b/gi, '')
+    .replace(/\b(20\d{2})[-/.]\d{1,2}[-/.]\d{1,2}\b|\b\d{1,2}[-/.]\d{1,2}[-/.]20\d{2}\b/gi, '')
+    .replace(/\s+/g, ' ').replace(/^[\s,.-]+|[\s,.-]+$/g, '').trim()
+    || (amount ? 'Voice or receipt entry' : '');
+}
 
 function formatCompactCurrency(value: number, currency?: CurrencyCode) {
   let active = currency;
@@ -813,7 +881,7 @@ export function App() {
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showFeedback && <AppFeedbackModal feedback={feedback} setFeedback={setFeedback} status={feedbackStatus} onSent={() => setFeedbackStatus('sent')} onLocal={() => setFeedbackStatus('local')} onClose={() => { setShowFeedback(false); setFeedbackStatus('idle'); }} />}
       {showLegal && <AppLegalModal onClose={() => setShowLegal(false)} />}
-      {showAi && <AiConversation enabled={aiEnabled} loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} errorCode={aiErrorCode} range={range} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
+      {showAi && <AiConversation enabled={aiEnabled} loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} errorCode={aiErrorCode} range={range} currency={data.baseCurrency ?? 'USD'} categoryNames={categorySpend.map(({ category }) => category.name)} transactionCount={rangeTransactions.length} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
 }
@@ -1002,10 +1070,67 @@ function TransactionModal({ data, baseCurrency, defaultCurrency, month, categori
   const [description, setDescription] = useState(transaction?.description ?? '');
   const [currency, setCurrency] = useState<CurrencyCode>(transaction?.currency ?? defaultCurrency);
   const [fxRate, setFxRate] = useState(String(transaction?.fxRateToBase ?? ''));
+  const [captureStatus, setCaptureStatus] = useState('');
+  const [captureText, setCaptureText] = useState('');
+  const [voiceListening, setVoiceListening] = useState(false);
+  const receiptInput = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<BrowserSpeechRecognition | null>(null);
   const available = categories.filter((category) => type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
   useEffect(() => { if (!available.some((category) => category.id === categoryId)) setCategoryId(available[0]?.id ?? ''); }, [type]);
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : Number(fxRate) > 0 ? 'manual rate' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
+  useEffect(() => () => recognitionRef.current?.stop(), []);
+
+  function applyCapturedText(text: string, source: 'receipt' | 'voice') {
+    const nextType = parseEntryType(text);
+    const nextAmount = parseEntryAmount(text);
+    setType(nextType);
+    setCurrency(parseEntryCurrency(text, currency));
+    if (nextAmount) setAmount(String(nextAmount));
+    setDate(parseEntryDate(text));
+    setCategoryId(parseEntryCategory(text, categories, nextType));
+    setDescription(parseEntryDescription(text, nextAmount));
+    setCaptureText(text.trim());
+    setCaptureStatus(source === 'receipt' ? 'Receipt draft ready — review every field before saving.' : 'Voice draft ready — review every field before saving.');
+  }
+
+  async function readReceipt(file: File) {
+    setCaptureStatus('Reading the receipt locally…');
+    setCaptureText('');
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+      const result = await worker.recognize(file);
+      await worker.terminate();
+      applyCapturedText(result.data.text, 'receipt');
+    } catch (error) {
+      setCaptureStatus(error instanceof Error ? `Receipt reading failed: ${error.message}` : 'Receipt reading failed. You can still enter the fields manually.');
+    }
+  }
+
+  function toggleVoice() {
+    if (voiceListening) { recognitionRef.current?.stop(); return; }
+    const Recognition = speechRecognitionConstructor();
+    if (!Recognition) { setCaptureStatus('Voice entry is not supported in this browser. You can use receipt capture or type the entry manually.'); return; }
+    const recognition = new Recognition();
+    recognition.lang = navigator.language || 'en-US';
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const result = event as { results?: ArrayLike<ArrayLike<{ transcript?: string }>> };
+      const transcript = Array.from(result.results ?? []).map((item) => item?.[0]?.transcript ?? '').join(' ').trim();
+      if (transcript) applyCapturedText(transcript, 'voice');
+    };
+    recognition.onerror = (event) => { setCaptureStatus(`Voice entry stopped: ${event.error ?? 'browser speech recognition error'}.`); setVoiceListening(false); };
+    recognition.onend = () => { setVoiceListening(false); recognitionRef.current = null; };
+    recognitionRef.current = recognition;
+    setCaptureText('');
+    setCaptureStatus('Listening… say, for example, “spent 25 AED on lunch”.');
+    setVoiceListening(true);
+    recognition.start();
+  }
+
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><div className="modal"><div className="modal-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> {transaction ? 'Update entry' : 'New entry'}</div><h2>{transaction ? 'Edit transaction' : 'Log a transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="capture-tools"><button className="secondary-button small" type="button" onClick={() => receiptInput.current?.click()} disabled={captureStatus === 'Reading the receipt locally…'}><Camera size={15} /> Scan receipt</button><input ref={receiptInput} className="sr-only" type="file" accept="image/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readReceipt(file); event.target.value = ''; }} /><button className={`secondary-button small ${voiceListening ? 'capture-active' : ''}`} type="button" onClick={toggleVoice}><Mic size={15} /> {voiceListening ? 'Stop listening' : 'Voice entry'}</button></div>{captureStatus && <div className="capture-status" role="status"><span>{captureStatus}</span>{captureText && <small>Detected text stays in this browser and is only used to fill this draft.</small>}</div>}<div className="type-toggle"><button className={type === 'expense' ? 'selected expense' : ''} onClick={() => setType('expense')}><ArrowUpRight size={16} /> Expense</button><button className={type === 'income' ? 'selected income' : ''} onClick={() => setType('income')}><ArrowDownLeft size={16} /> Income</button></div><div className="form-grid"><label className="full-field"><span>Amount</span><div className="amount-input"><span>{currencySymbol(currency)}</span><input autoFocus inputMode="decimal" type="number" min="0" step="0.01" value={amount} onChange={(event) => setAmount(event.target.value)} placeholder="0.00" /></div></label><label><span>Date</span><input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label><label><span>Currency</span><select value={currency} onChange={(event) => setCurrency(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><label><span>Category</span><select value={categoryId} onChange={(event) => setCategoryId(event.target.value)}>{available.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select></label>{currency !== baseCurrency && <label><span>1 {currency} = {baseCurrency}</span><input inputMode="decimal" type="number" min="0.000001" step="0.000001" value={fxRate} onChange={(event) => setFxRate(event.target.value)} placeholder="Update via Data → AI rates" /></label>}<label className="full-field"><span>Description <em>optional</em></span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="e.g. Coffee with Sam" /></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!Number(amount) || Number(amount) <= 0 || !date || !categoryId} onClick={() => onSave({ id: transaction?.id ?? makeId(), type, amount: Number(amount), date, categoryId, description: description.trim(), currency, fxRateToBase: currency === baseCurrency ? 1 : Number(fxRate) || 1, fxSource: currency === baseCurrency ? 'same currency' : Number(fxRate) > 0 ? 'manual rate' : 'pending Gemini rate' })}>{transaction ? 'Save changes' : 'Add transaction'} <ArrowUpRight size={16} /></button></div></div></div>;
 }
+
 function ClearDataModal({ hasStarterData, onExport, onClose, onConfirm }: { hasStarterData: boolean; onExport: () => void; onClose: () => void; onConfirm: () => void }) {
   return <div className="modal-backdrop clear-data-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal clear-data-modal" role="dialog" aria-modal="true" aria-labelledby="clear-data-title"><div className="clear-data-icon"><Trash2 size={22} /></div><div className="panel-kicker"><ShieldAlert size={14} /> Destructive local action</div><h2 id="clear-data-title">Clear {hasStarterData ? 'starter data' : 'all local data'}?</h2><p className="clear-data-lede">This removes all transactions and category budgets from this browser and cannot be undone.</p><div className="clear-data-list"><span><Check size={14} /> Your selected currency stays saved</span><span><Check size={14} /> Your categories return to the default set</span><span><ShieldAlert size={14} /> Export a backup first if you may need this data later</span></div><div className="clear-data-actions"><button className="secondary-button" onClick={onExport}><Download size={15} /> Export backup first</button><button className="danger-button" onClick={onConfirm}><Trash2 size={15} /> Clear data</button></div><button className="text-button clear-data-cancel" onClick={onClose}>Keep my data</button></section></div>;
 }
@@ -1173,7 +1298,7 @@ function TabBar({ view, onNavigate, onAdd }: { view: View; onNavigate: (view: Vi
   </nav>;
 }
 
-function AiConversation({ enabled, loading, insight, messages, asking, error, errorCode, range, failedQuestion, aiRemaining, onClose, onRetry, onRetryFollowUp, onAsk }: { enabled: boolean; loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; errorCode: AiErrorCode; range: DateRange; failedQuestion: string; aiRemaining: number; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
+function AiConversation({ enabled, loading, insight, messages, asking, error, errorCode, range, currency, categoryNames, transactionCount, failedQuestion, aiRemaining, onClose, onRetry, onRetryFollowUp, onAsk }: { enabled: boolean; loading: boolean; insight: AiInsight | null; messages: AiMessage[]; asking: boolean; error: string; errorCode: AiErrorCode; range: DateRange; currency: CurrencyCode; categoryNames: string[]; transactionCount: number; failedQuestion: string; aiRemaining: number; onClose: () => void; onRetry: () => void; onRetryFollowUp: () => void; onAsk: (question: string) => void }) {
   const [draft, setDraft] = useState('');
   const suggestions = ['Why is my biggest category so high?', 'Which category grew fastest?', 'How can I free up $200 next month?'];
   const errorTitles: Record<AiErrorCode, string> = { disabled: 'Local-only mode is active', daily_limit: 'Daily AI limit reached', not_configured: 'AI setup is incomplete', invalid_key: 'Gemini authentication failed', rate_limit: 'Gemini free-tier limit reached', busy: 'Gemini is busy right now', network: 'Connection problem', validation: 'The AI request needs attention', response_invalid: 'Gemini returned an unusable response', service: 'AI service unavailable', unknown: 'AI request failed' };
@@ -1186,8 +1311,9 @@ function AiConversation({ enabled, loading, insight, messages, asking, error, er
   return <div className="modal-backdrop ai-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="modal ai-modal">
       <div className="modal-heading"><div><div className="panel-kicker"><Bot size={14} /> Budgital AI · {rangeLabel(range)}</div><h2>Ask about this period</h2><small className="ai-quota">{aiRemaining} AI {aiRemaining === 1 ? 'request' : 'requests'} left today</small></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div>
-      <div className="ai-privacy"><ShieldCheckIcon /><span>Only totals, category totals, and your local insights are sent. Individual transactions and descriptions stay in this browser.</span></div>
-      <p className="ai-disclaimer">Free-tier Gemini content may be used by Google to improve products. Keep AI off for strictly local-only budgeting.</p>
+      <div className="ai-privacy"><ShieldCheckIcon /><span>Only aggregate totals and category totals are sent after you request an insight. Individual transactions, dates, and descriptions stay in this browser.</span></div>
+      <div className="ai-context" aria-label="AI transparency"><strong><ShieldCheckIcon /> AI context</strong><span><b>Currency:</b> {currency}</span><span><b>Period:</b> {rangeLabel(range)}</span><span><b>Categories:</b> {categoryNames.length ? categoryNames.slice(0, 4).join(', ') + (categoryNames.length > 4 ? ` +${categoryNames.length - 4}` : '') : 'None yet'}</span><span><b>Transactions summarized:</b> {transactionCount} local entries</span><span><b>Usage:</b> {aiRemaining} of {AI_DAILY_LIMIT} requests remaining today</span></div>
+      <p className="ai-disclaimer">Free-tier Gemini content may be used by Google to improve products. Keep AI off for strictly local-only budgeting. Insights are informational, not financial advice.</p>
       {loading && <div className="ai-loading"><span className="loading-orbit"><Sparkles size={17} /></span><strong>Reading your period…</strong><p>Budgital is asking Gemini for a concise second opinion.</p></div>}
       {!loading && <>
         {!enabled && <div className="ai-disabled"><strong>Local-only mode is active</strong><p>Your dashboard Smart Reads still work without Gemini. Enable AI from Data → AI preferences when you want an optional second opinion.</p></div>}

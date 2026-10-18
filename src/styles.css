@@ -1206,3 +1206,21 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .ai-settings-panel .format-note { grid-column: 1 / -1; }
   .clear-data-actions { flex-direction: column; }
 }
+
+
+/* AI transparency and review-first capture tools */
+.ai-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 12px; margin-top: 10px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface-3); color: var(--t3); font-size: 9px; line-height: 1.45; }
+.ai-context strong { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; color: var(--ink); font-size: 10px; }
+.ai-context span { min-width: 0; overflow-wrap: anywhere; }
+.ai-context b { color: var(--ink-soft); font-weight: 800; }
+.capture-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 15px 0 10px; }
+.capture-tools button { flex: 1 1 150px; }
+.capture-tools .capture-active { border-color: var(--accent-text); background: var(--accent-soft); color: var(--accent-text); }
+.capture-status { display: grid; gap: 4px; margin: 8px 0 14px; padding: 10px 12px; border: 1px solid var(--accent-line); border-radius: 11px; background: var(--accent-soft); color: var(--accent-text); font-size: 10px; line-height: 1.45; }
+.capture-status small { color: var(--t3); font-size: 9px; }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0, 0, 0, 0) !important; white-space: nowrap !important; border: 0 !important; }
+@media (max-width: 560px) {
+  .ai-context { grid-template-columns: 1fr; gap: 6px; font-size: 9px; }
+  .capture-tools { margin-top: 12px; }
+  .capture-tools button { flex-basis: calc(50% - 4px); min-width: 0; padding-inline: 9px; font-size: 10px; }
+}
