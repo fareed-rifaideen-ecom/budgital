@@ -105,3 +105,12 @@
 - **Pilot feedback fixes** — Make Gemini failures explain whether the Netlify key/model configuration needs attention; expose a saved default currency for new entries; keep AED, SAR, and PHP selectable; add an exchange-rate route alias; and keep the mobile Light/Dark thumb centered at every supported width.
 
 - **First-run currency and Gemini production setup** — Require a default currency selection before entering the app, preserve it for new entries, keep the dark theme thumb inside the mobile pill, and verify the Netlify Functions production key before enabling Gemini-dependent features.
+
+## Phase 1 — Cloudflare feedback and runtime setup
+
+- [ ] Convert the active feedback client flow from Netlify Forms to `POST /api/feedback`; preserve the landing-page and app-page forms; send only kind, optional email, message, page, and timestamp; keep local fallback behavior when delivery fails; do not include budget transactions or financial data.
+- [ ] Add a Cloudflare Pages Function for `/api/feedback` with input validation, origin checking, honeypot handling, best-effort per-IP rate limiting, HTML escaping, structured errors, and no secret leakage.
+- [ ] Configure email notifications through server-side `RESEND_API_KEY`, `FEEDBACK_TO_EMAIL`, and `FEEDBACK_FROM_EMAIL`; document the Cloudflare Pages Production setup.
+- [ ] Document encrypted `GEMINI_API_KEY` and optional `GEMINI_MODEL` Cloudflare Pages Production settings.
+- [ ] Serve SPA routes through `public/_redirects` and static/security behavior through `public/_headers`; verify both files are copied to `dist/`.
+- [ ] Build and syntax-check the Phase 1 implementation locally; do not deploy or change DNS in this pass.
