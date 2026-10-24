@@ -1,2 +1,2 @@
-allowBuilds:
-  tesseract.js: true
+packages:
+  - "."
