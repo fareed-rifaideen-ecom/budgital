@@ -23,6 +23,12 @@ function cleanText(value, max) {
   return typeof value === 'string' ? value.replace(/[<>]/g, '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, max) : '';
 }
 
+function cleanSender(value) {
+  return typeof value === 'string'
+    ? value.replace(/[\r\n\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, MAX_EMAIL_LENGTH)
+    : '';
+}
+
 function escapeHtml(value) {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, '<br />');
 }
@@ -64,7 +70,7 @@ function emailBody(input) {
 async function sendEmail(env, input) {
   const apiKey = env.RESEND_API_KEY;
   const to = cleanText(env.FEEDBACK_TO_EMAIL, MAX_EMAIL_LENGTH);
-  const from = cleanText(env.FEEDBACK_FROM_EMAIL, MAX_EMAIL_LENGTH);
+  const from = cleanSender(env.FEEDBACK_FROM_EMAIL);
   if (!apiKey || !to || !from) return { configured: false };
 
   const response = await fetch('https://api.resend.com/emails', {
