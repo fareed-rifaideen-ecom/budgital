@@ -1224,3 +1224,38 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .capture-tools { margin-top: 12px; }
   .capture-tools button { flex-basis: calc(50% - 4px); min-width: 0; padding-inline: 9px; font-size: 10px; }
 }
+
+
+/* Recurring transactions and monthly planning */
+.intro-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; justify-content: flex-end; }
+.recurring-panel { margin-bottom: 15px; padding: 18px 21px; }
+.recurring-panel > p { margin: -3px 0 13px; max-width: 620px; font-size: 10px; line-height: 1.55; }
+.recurring-list { display: grid; gap: 7px; }
+.recurring-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 14px; padding: 11px 0; border-top: 1px solid var(--line); }
+.recurring-row strong { display: block; font-size: 11px; }
+.recurring-row small { display: block; margin-top: 3px; color: var(--t3); font-size: 9px; }
+.plan-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; overflow: hidden; margin-bottom: 15px; }
+.plan-summary > div { display: grid; gap: 6px; padding: 15px 16px; background: var(--surface-2); }
+.plan-summary span { color: var(--t3); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.plan-summary strong { font-size: 16px; letter-spacing: -.03em; }
+.budget-controls { display: grid; gap: 12px; margin-bottom: 15px; padding: 13px 16px; }
+.template-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.template-actions select, .template-actions input { min-height: 34px; border: 1px solid var(--line); border-radius: 9px; padding: 0 10px; background: var(--surface-3); color: var(--ink); font: inherit; font-size: 10px; }
+.template-actions input { min-width: 150px; }
+.comparison-row .budget-value { min-width: 122px; }
+.comparison-row .budget-value strong { display: block; font-size: 11px; }
+.comparison-row .budget-value input { width: 80px; }
+.type-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin: 4px 0 16px; }
+.type-toggle button { min-height: 38px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-3); color: var(--t2); font: inherit; font-size: 11px; font-weight: 800; }
+.type-toggle button.selected.expense { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn-text); }
+.type-toggle button.selected.income { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent-text); }
+@media (max-width: 760px) {
+  .intro-actions { width: 100%; justify-content: stretch; }
+  .intro-actions > button { flex: 1; }
+  .plan-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan-summary > div:last-child { grid-column: 1 / -1; }
+  .template-actions > * { flex: 1 1 100%; }
+  .template-actions .small { width: 100%; }
+  .recurring-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .recurring-row .row-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}

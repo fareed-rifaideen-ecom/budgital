@@ -80,6 +80,9 @@ type Transaction = {
   currency?: CurrencyCode;
   fxRateToBase?: number;
   fxSource?: string;
+  source?: 'manual' | 'recurring' | 'imported' | 'receipt' | 'voice';
+  recurringId?: string;
+  occurrenceKey?: string;
 };
 
 type Budget = {
@@ -87,16 +90,56 @@ type Budget = {
   amount: number;
 };
 
+type RecurrenceFrequency = 'monthly' | 'weekly' | 'yearly';
+type RecurringTransaction = {
+  id: string;
+  type: TransactionType;
+  amount: number;
+  currency: CurrencyCode;
+  categoryId: string;
+  description: string;
+  frequency: RecurrenceFrequency;
+  dayOfMonth?: number;
+  dayOfWeek?: number;
+  monthOfYear?: number;
+  startDate: string;
+  endDate?: string;
+  active: boolean;
+  createdAt: string;
+};
+
+type BudgetTemplate = {
+  id: string;
+  name: string;
+  currency: CurrencyCode;
+  plannedIncome: number;
+  categoryBudgets: Budget[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type MonthlyPlan = {
+  month: string;
+  templateId?: string;
+  plannedIncome: number;
+  categoryBudgets: Budget[];
+  appliedAt: string;
+};
+
 type BudgitalData = {
+  schemaVersion?: number;
   categories: Category[];
   transactions: Transaction[];
   budgets: Budget[];
+  recurringTransactions?: RecurringTransaction[];
+  budgetTemplates?: BudgetTemplate[];
+  monthlyPlans?: MonthlyPlan[];
   isDemo: boolean;
   baseCurrency?: CurrencyCode;
   defaultCurrency?: CurrencyCode;
 };
 
-type ImportRow = Transaction & { valid: boolean; error?: string; warning?: string; recordType?: 'transaction' | 'category' | 'budget'; importCategory?: Category; importBudget?: Budget };
+type ImportRow = Transaction & { valid: boolean; error?: string; warning?: string; recordType?: 'transaction' | 'category' | 'budget' | 'recurring' | 'template' | 'plan'; importCategory?: Category; importBudget?: Budget; importRecurring?: RecurringTransaction; importTemplate?: BudgetTemplate; importPlan?: MonthlyPlan };
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
@@ -163,6 +206,7 @@ const localISO = (date: Date) => `${date.getFullYear()}-${pad2(date.getMonth() +
 const isoDate = (date = new Date()) => localISO(date);
 const monthKey = (date: string) => date.slice(0, 7);
 const currentMonth = isoDate().slice(0, 7);
+const DATA_SCHEMA_VERSION = 2;
 
 function systemTheme(): Theme {
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
@@ -217,15 +261,73 @@ function demoData(): BudgitalData {
       { id: makeId(), type: 'expense', amount: 3100, date: `${previousMonth}-12`, categoryId: 'rent', description: 'Previous month snapshot' },
     ],
     isDemo: true,
+    schemaVersion: DATA_SCHEMA_VERSION,
+    recurringTransactions: [],
+    budgetTemplates: [{ id: 'starter-template', name: 'Starter baseline', currency: 'USD', plannedIncome: 6000, categoryBudgets: [{ categoryId: 'rent', amount: 1600 }, { categoryId: 'food', amount: 600 }, { categoryId: 'dining', amount: 320 }, { categoryId: 'transport', amount: 250 }, { categoryId: 'subscriptions', amount: 120 }, { categoryId: 'health', amount: 180 }], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+    monthlyPlans: [{ month, plannedIncome: 6000, categoryBudgets: [{ categoryId: 'rent', amount: 1600 }, { categoryId: 'food', amount: 600 }, { categoryId: 'dining', amount: 320 }, { categoryId: 'transport', amount: 250 }, { categoryId: 'subscriptions', amount: 120 }, { categoryId: 'health', amount: 180 }], appliedAt: new Date().toISOString(), templateId: 'starter-template' }],
     baseCurrency: 'USD',
     defaultCurrency: 'USD',
   };
 }
 
+function migrateData(parsed: BudgitalData): BudgitalData {
+  const now = new Date().toISOString();
+  const budgets = Array.isArray(parsed.budgets) ? parsed.budgets : [];
+  const baseCurrency = parsed.baseCurrency ?? parsed.defaultCurrency ?? 'USD';
+  const templates = Array.isArray(parsed.budgetTemplates) ? parsed.budgetTemplates : [{ id: `template-${makeId()}`, name: 'My baseline', currency: baseCurrency, plannedIncome: 0, categoryBudgets: budgets, createdAt: now, updatedAt: now }];
+  const monthlyPlans = Array.isArray(parsed.monthlyPlans) && parsed.monthlyPlans.length ? parsed.monthlyPlans : [{ month: currentMonth, plannedIncome: 0, categoryBudgets: budgets, appliedAt: now, templateId: templates[0]?.id }];
+  return { ...parsed, schemaVersion: DATA_SCHEMA_VERSION, budgets, recurringTransactions: Array.isArray(parsed.recurringTransactions) ? parsed.recurringTransactions : [], budgetTemplates: templates, monthlyPlans, baseCurrency, defaultCurrency: parsed.defaultCurrency ?? baseCurrency };
+}
+
+function planForMonth(data: BudgitalData, month: string): MonthlyPlan {
+  const plan = data.monthlyPlans?.find((item) => item.month === month);
+  return plan ?? { month, plannedIncome: 0, categoryBudgets: data.budgets ?? [], appliedAt: new Date().toISOString() };
+}
+
+function occurrenceDate(rule: RecurringTransaction, year: number, month: number) {
+  if (rule.frequency === 'monthly') {
+    const day = Math.min(rule.dayOfMonth ?? 1, new Date(year, month, 0).getDate());
+    return `${year}-${pad2(month)}-${pad2(day)}`;
+  }
+  if (rule.frequency === 'yearly') return `${year}-${pad2(rule.monthOfYear ?? Number(rule.startDate.slice(5, 7)))}-${pad2(rule.dayOfMonth ?? Number(rule.startDate.slice(8, 10)))}`;
+  return '';
+}
+
+function generateRecurringCatchUp(input: BudgitalData, today = isoDate()): BudgitalData {
+  const rules = input.recurringTransactions ?? [];
+  if (!rules.length) return input;
+  const transactions = [...input.transactions];
+  const existing = new Set(transactions.map((item) => item.occurrenceKey).filter(Boolean));
+  const current = new Date(`${today}T12:00:00`);
+  for (const rule of rules) {
+    if (!rule.active || rule.startDate > today) continue;
+    const start = new Date(`${rule.startDate}T12:00:00`);
+    const dates: string[] = [];
+    if (rule.frequency === 'weekly') {
+      const cursor = new Date(start);
+      const target = rule.dayOfWeek ?? start.getDay();
+      cursor.setDate(cursor.getDate() + ((target - cursor.getDay() + 7) % 7));
+      while (cursor <= current && dates.length < 600) { dates.push(localISO(cursor)); cursor.setDate(cursor.getDate() + 7); }
+    } else if (rule.frequency === 'monthly') {
+      let cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+      while (cursor <= current && dates.length < 240) { dates.push(occurrenceDate(rule, cursor.getFullYear(), cursor.getMonth() + 1)); cursor.setMonth(cursor.getMonth() + 1); }
+    } else {
+      for (let year = start.getFullYear(); year <= current.getFullYear() && dates.length < 100; year += 1) dates.push(occurrenceDate(rule, year, 1));
+    }
+    dates.filter((date) => date >= rule.startDate && date <= today && (!rule.endDate || date <= rule.endDate)).forEach((date) => {
+      const occurrenceKey = `${rule.id}:${date}`;
+      if (existing.has(occurrenceKey)) return;
+      transactions.unshift({ id: `recurring-${occurrenceKey}`, type: rule.type, amount: rule.amount, date, categoryId: rule.categoryId, description: rule.description, currency: rule.currency, fxRateToBase: rule.currency === (input.baseCurrency ?? 'USD') ? 1 : undefined, fxSource: rule.currency === (input.baseCurrency ?? 'USD') ? 'same currency' : 'pending Gemini rate', source: 'recurring', recurringId: rule.id, occurrenceKey });
+      existing.add(occurrenceKey);
+    });
+  }
+  return transactions.length === input.transactions.length ? input : { ...input, transactions };
+}
+
 function loadData(): BudgitalData {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) { const parsed = JSON.parse(stored) as BudgitalData; return { ...parsed, baseCurrency: parsed.baseCurrency ?? 'USD', defaultCurrency: parsed.defaultCurrency ?? parsed.baseCurrency ?? 'USD' }; }
+    if (stored) return generateRecurringCatchUp(migrateData(JSON.parse(stored) as BudgitalData));
   } catch {
     // Fall back to the friendly starter state when storage is unavailable.
   }
@@ -506,8 +608,14 @@ export function App() {
     document.querySelector('meta[name=robots]')?.setAttribute('content', 'noindex,nofollow');
   }, []);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, schemaVersion: DATA_SCHEMA_VERSION }));
   }, [data]);
+  useEffect(() => {
+    const catchUp = () => setData((current) => generateRecurringCatchUp(current));
+    window.addEventListener('focus', catchUp);
+    document.addEventListener('visibilitychange', catchUp);
+    return () => { window.removeEventListener('focus', catchUp); document.removeEventListener('visibilitychange', catchUp); };
+  }, []);
   useEffect(() => {
     localStorage.setItem(AI_MODE_KEY, aiEnabled ? 'on' : 'off');
   }, [aiEnabled]);
@@ -589,9 +697,7 @@ export function App() {
     return { income, expenses, budget, left: income - expenses, budgetLeft: budget - expenses, budgetMonths };
   }, [data.baseCurrency, data.budgets, range, rangeExpenses, rangeIncome]);
 
-  function mutate(next: BudgitalData) {
-    setData({ ...next, isDemo: false });
-  }
+  function mutate(next: BudgitalData) { setData({ ...next, schemaVersion: DATA_SCHEMA_VERSION, isDemo: false }); }
 
   async function handleSaveTransaction(transaction: Transaction) {
     let savedTransaction = transaction;
@@ -624,9 +730,27 @@ export function App() {
     return category;
   }
 
-  function handleBudgetChange(categoryId: string, amount: number) {
-    const without = data.budgets.filter((budget) => budget.categoryId !== categoryId);
-    mutate({ ...data, budgets: amount > 0 ? [...without, { categoryId, amount }] : without });
+  function handleBudgetChange(month: string, categoryId: string, amount: number) {
+    const plan = planForMonth(data, month);
+    const without = plan.categoryBudgets.filter((budget) => budget.categoryId !== categoryId);
+    const categoryBudgets = amount > 0 ? [...without, { categoryId, amount }] : without;
+    const monthlyPlans = [...(data.monthlyPlans ?? []).filter((item) => item.month !== month), { ...plan, month, categoryBudgets, appliedAt: new Date().toISOString() }];
+    mutate({ ...data, monthlyPlans, budgets: month === currentMonth ? categoryBudgets : data.budgets });
+  }
+  function handleSaveRecurring(rule: RecurringTransaction) {
+    const recurringTransactions = [...(data.recurringTransactions ?? []).filter((item) => item.id !== rule.id), rule];
+    mutate(generateRecurringCatchUp({ ...data, recurringTransactions }));
+  }
+  function handleDeleteRecurring(id: string) {
+    mutate({ ...data, recurringTransactions: (data.recurringTransactions ?? []).filter((item) => item.id !== id) });
+  }
+  function handleApplyTemplate(month: string, template: BudgetTemplate) {
+    const monthlyPlans = [...(data.monthlyPlans ?? []).filter((item) => item.month !== month), { month, templateId: template.id, plannedIncome: template.plannedIncome, categoryBudgets: template.categoryBudgets, appliedAt: new Date().toISOString() }];
+    mutate({ ...data, monthlyPlans, budgets: month === currentMonth ? template.categoryBudgets : data.budgets });
+  }
+  function handleSaveTemplate(template: BudgetTemplate) {
+    const budgetTemplates = [...(data.budgetTemplates ?? []).filter((item) => item.id !== template.id), template];
+    mutate({ ...data, budgetTemplates });
   }
 
   function handleImport(rows: ImportRow[]) {
@@ -638,10 +762,19 @@ export function App() {
     const importedBudgets = valid.flatMap((row) => row.importBudget ? [row.importBudget] : []);
     const budgetsByCategory = new Map(data.budgets.map((budget) => [budget.categoryId, budget]));
     importedBudgets.forEach((budget) => budgetsByCategory.set(budget.categoryId, budget));
-    const importedTransactions = valid.filter((row) => row.recordType !== 'category' && row.recordType !== 'budget').map(({ valid: _valid, error: _error, recordType: _recordType, importCategory: _category, importBudget: _budget, ...row }) => row);
+    const importedRecurring = valid.flatMap((row) => row.importRecurring ? [row.importRecurring] : []);
+    const recurringById = new Map((data.recurringTransactions ?? []).map((rule) => [rule.id, rule]));
+    importedRecurring.forEach((rule) => recurringById.set(rule.id, rule));
+    const importedTemplates = valid.flatMap((row) => row.importTemplate ? [row.importTemplate] : []);
+    const templatesById = new Map((data.budgetTemplates ?? []).map((template) => [template.id, template]));
+    importedTemplates.forEach((template) => templatesById.set(template.id, template));
+    const importedPlans = valid.flatMap((row) => row.importPlan ? [row.importPlan] : []);
+    const plansByMonth = new Map((data.monthlyPlans ?? []).map((plan) => [plan.month, plan]));
+    importedPlans.forEach((plan) => plansByMonth.set(plan.month, plan));
+    const importedTransactions = valid.filter((row) => row.recordType === 'transaction' || !row.recordType).map(({ valid: _valid, error: _error, recordType: _recordType, importCategory: _category, importBudget: _budget, importRecurring: _recurring, importTemplate: _template, importPlan: _plan, ...row }) => row);
     const transactionsById = new Map(data.transactions.map((transaction) => [transaction.id, transaction]));
     importedTransactions.forEach((transaction) => transactionsById.set(transaction.id, transaction));
-    mutate({ ...data, categories: Array.from(categoriesById.values()), budgets: Array.from(budgetsByCategory.values()), transactions: Array.from(transactionsById.values()) });
+    mutate({ ...data, categories: Array.from(categoriesById.values()), budgets: Array.from(budgetsByCategory.values()), transactions: Array.from(transactionsById.values()), recurringTransactions: Array.from(recurringById.values()), budgetTemplates: Array.from(templatesById.values()), monthlyPlans: Array.from(plansByMonth.values()) });
     setShowImport(false);
   }
 
@@ -882,8 +1015,8 @@ export function App() {
 
         <div className="content-wrap">
           {view === 'overview' && <Overview data={data} range={range} totals={totals} expenses={rangeExpenses} categorySpend={categorySpend} onNavigate={goTo} onAdd={() => setShowAdd(true)} onClear={clearData} onOpenRange={() => setShowRange(true)} />}
-          {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} />}
-          {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
+          {view === 'transactions' && <TransactionsView data={data} range={range} onRangeChange={(nextPreset, custom) => { setPreset(nextPreset); if (custom) setCustomRange(custom); }} onEdit={setEditingTransaction} onDelete={handleDeleteTransaction} onAdd={() => setShowAdd(true)} onOpenRange={() => setShowRange(true)} onSaveRecurring={handleSaveRecurring} onDeleteRecurring={handleDeleteRecurring} />}
+          {view === 'budgets' && <BudgetsView data={data} month={anchor} onBudgetChange={handleBudgetChange} onApplyTemplate={handleApplyTemplate} onSaveTemplate={handleSaveTemplate} onAddCategory={handleAddCategory} onShift={shiftAnchor} />}
           {view === 'data' && <DataView data={data} onImport={() => setShowImport(true)} onExport={handleExport} lastExportAt={lastExportAt} aiEnabled={aiEnabled} onAiEnabledChange={setAiEnabled} onClear={clearData} baseCurrency={data.baseCurrency ?? 'USD'} defaultCurrency={data.defaultCurrency ?? data.baseCurrency ?? 'USD'} onDefaultCurrencyChange={handleDefaultCurrencyChange} onRefreshRates={refreshExchangeRates} fxMessage={fxMessage} />}
         </div>
       </main>
@@ -994,11 +1127,13 @@ function TransactionRow({ transaction, category, baseCurrency }: { transaction: 
   return <div className="transaction-row"><span className="category-icon" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={15} /></span><div className="transaction-main"><strong>{transaction.description || category.name}</strong><small>{category.name} · {fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</small></div><strong className={transaction.type === 'income' ? 'positive-text' : 'expense-amount'}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(transaction.amount, transaction.currency)}{transaction.currency && transaction.fxRateToBase && transaction.fxRateToBase !== 1 ? <small className="native-currency-note">≈ {formatCurrency(amountInBase(transaction, baseCurrency), baseCurrency)}</small> : transaction.currency && !hasKnownBaseAmount(transaction) ? <small className="native-currency-note">rate needed</small> : null}</strong></div>;
 }
 
-function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange }: { data: BudgitalData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void }) {
+function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd, onOpenRange, onSaveRecurring, onDeleteRecurring }: { data: BudgitalData; range: DateRange; onRangeChange: (preset: RangePreset, custom?: { start: string; end: string }) => void; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void; onAdd: () => void; onOpenRange: () => void; onSaveRecurring: (rule: RecurringTransaction) => void; onDeleteRecurring: (id: string) => void }) {
   const [filter, setFilter] = useState<'all' | TransactionType>('all');
   const [query, setQuery] = useState('');
   const [categoryId, setCategoryId] = useState('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'highest' | 'lowest'>('newest');
+  const [showRecurring, setShowRecurring] = useState(false);
+  const [editingRecurring, setEditingRecurring] = useState<RecurringTransaction | null>(null);
   const isCompact = useMediaQuery('(max-width: 960px)');
   const categories = [...data.categories].sort((a, b) => a.name.localeCompare(b.name));
   const search = query.trim().toLowerCase();
@@ -1018,8 +1153,9 @@ function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd,
   return <>
     <section className="page-intro compact">
       <div><div className="kicker"><Receipt size={14} /> Activity ledger</div><h1>Transactions</h1><p><strong>{rangeLabel(range)}</strong> · {visible.length} {visible.length === 1 ? 'entry' : 'entries'} <button className="inline-link" onClick={onOpenRange}>Change dates</button></p></div>
-      <button className="primary-button" onClick={onAdd}><Plus size={17} /> Add transaction</button>
+      <div className="intro-actions"><button className="secondary-button" onClick={() => { setEditingRecurring(null); setShowRecurring(true); }}><CalendarDays size={16} /> Recurring</button><button className="primary-button" onClick={onAdd}><Plus size={17} /> Add transaction</button></div>
     </section>
+    <RecurringList data={data} onAdd={() => { setEditingRecurring(null); setShowRecurring(true); }} onEdit={(rule) => { setEditingRecurring(rule); setShowRecurring(true); }} onDelete={onDeleteRecurring} />
     <div className="panel ledger-panel">
       <div className="ledger-toolbar">
         <div className="segmented"><button className={filter === 'all' ? 'selected' : ''} onClick={() => setFilter('all')}>All</button><button className={filter === 'income' ? 'selected' : ''} onClick={() => setFilter('income')}>Income</button><button className={filter === 'expense' ? 'selected' : ''} onClick={() => setFilter('expense')}>Expenses</button></div>
@@ -1041,7 +1177,13 @@ function TransactionsView({ data, range, onRangeChange, onEdit, onDelete, onAdd,
       <div className="table-wrap">{!isCompact && <table className="table-only"><thead><tr><th>Transaction</th><th>Category</th><th>Date</th><th className="align-right">Amount</th><th aria-label="Actions" /></tr></thead><tbody>{visible.map((transaction) => { const category = getCategory(data.categories, transaction.categoryId); return <tr key={transaction.id}><td><div className="table-transaction"><span className="category-icon small" style={{ background: `${category.color}44`, color: 'var(--ink)' }}><Tags size={14} /></span><strong>{transaction.description || category.name}</strong></div></td><td><span className="category-pill" style={{ '--pill-color': category.color } as CSSProperties}>{category.name}</span></td><td>{fullDateFormatter.format(new Date(`${transaction.date}T12:00:00`))}</td><td className={`align-right amount-cell ${transaction.type === 'income' ? 'positive-text' : ''}`}>{transaction.type === 'income' ? '+' : '−'}{formatCurrency(amountInBase(transaction, baseCurrency), baseCurrency)}</td><td><div className="row-actions"><button className="icon-button" onClick={() => onEdit(transaction)} aria-label="Edit transaction"><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(transaction.id)} aria-label="Delete transaction"><Trash2 size={15} /></button></div></td></tr>; })}</tbody></table>}{isCompact && <TransactionCards data={data} baseCurrency={baseCurrency} transactions={visible} onEdit={onEdit} onDelete={onDelete} />}</div>
       {!visible.length && <EmptyState title="No transactions match" copy="Try a wider date range or clear the filters." />}
     </div>
+    {showRecurring && <RecurringModal data={data} rule={editingRecurring} onClose={() => setShowRecurring(false)} onSave={(rule) => { onSaveRecurring(rule); setShowRecurring(false); }} />}
   </>;
+}
+
+function RecurringList({ data, onAdd, onEdit, onDelete }: { data: BudgitalData; onAdd: () => void; onEdit: (rule: RecurringTransaction) => void; onDelete: (id: string) => void }) {
+  const rules = data.recurringTransactions ?? [];
+  return <section className="panel recurring-panel"><div className="panel-heading"><div><div className="panel-kicker"><CalendarDays size={14} /> Local automation</div><h2>Recurring transactions</h2></div><button className="primary-button small" onClick={onAdd}><Plus size={15} /> Add rule</button></div><p className="muted">Budgital catches up missed occurrences when you return. It never creates the same occurrence twice.</p>{rules.length ? <div className="recurring-list">{rules.map((rule) => <div className="recurring-row" key={rule.id}><div><strong>{rule.description}</strong><small>{rule.frequency} · {getCategory(data.categories, rule.categoryId).name} · starts {rule.startDate}</small></div><strong className={rule.type === 'income' ? 'positive-text' : 'expense-amount'}>{rule.type === 'income' ? '+' : '−'}{formatCurrency(rule.amount, rule.currency)}</strong><div className="row-actions"><button className="icon-button" onClick={() => onEdit(rule)} aria-label={`Edit ${rule.description}`}><Settings2 size={15} /></button><button className="icon-button danger" onClick={() => onDelete(rule.id)} aria-label={`Delete ${rule.description}`}><Trash2 size={15} /></button></div></div>)}</div> : <EmptyState title="No recurring rules yet" copy="Add rent, salary, subscriptions, or any predictable money movement." />}</section>;
 }
 
 function TransactionCards({ data, baseCurrency, transactions, onEdit, onDelete }: { data: BudgitalData; baseCurrency: CurrencyCode; transactions: Transaction[]; onEdit: (transaction: Transaction) => void; onDelete: (id: string) => void }) {
@@ -1055,10 +1197,30 @@ function TransactionCards({ data, baseCurrency, transactions, onEdit, onDelete }
   })}</div>;
 }
 
-function BudgetsView({ data, month, onBudgetChange, onAddCategory, onShift }: { data: BudgitalData; month: string; onBudgetChange: (categoryId: string, amount: number) => void; onAddCategory: (name: string, kind: Category['kind']) => Category; onShift: (delta: number) => void }) {
+function BudgetsView({ data, month, onBudgetChange, onApplyTemplate, onSaveTemplate, onAddCategory, onShift }: { data: BudgitalData; month: string; onBudgetChange: (month: string, categoryId: string, amount: number) => void; onApplyTemplate: (month: string, template: BudgetTemplate) => void; onSaveTemplate: (template: BudgetTemplate) => void; onAddCategory: (name: string, kind: Category['kind']) => Category; onShift: (delta: number) => void }) {
   const [newCategory, setNewCategory] = useState('');
+  const [mode, setMode] = useState<'compare' | 'planned' | 'actual'>('compare');
+  const [templateName, setTemplateName] = useState('');
   const expenseCategories = data.categories.filter((category) => category.kind !== 'income');
-  return <><section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Give every category a number that feels realistic for <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Monthly plan</span><strong>{formatCurrency(data.budgets.reduce((sum, budget) => sum + budget.amount, 0))}</strong></div></div></section><div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>Monthly budgets</h2></div><span className="muted">Edit inline</span></div><div className="budget-list">{expenseCategories.map((category) => { const budget = data.budgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const spent = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0); const ratio = budget ? spent / budget : 0; return <div className="budget-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{formatCurrency(spent)} spent</small></div><div className="budget-track"><span style={{ width: `${Math.min(ratio * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value"><span>$</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={budget || ''} placeholder="0" onChange={(event) => onBudgetChange(category.id, Number(event.target.value))} /><small>{ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(budget - spent, 0))} left`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Tip: start with a round number, then tune it after two months of real spending.</span></div></div></div></>;
+  const plan = planForMonth(data, month);
+  const actualIncome = data.transactions.filter((transaction) => transaction.type === 'income' && monthKey(transaction.date) === month).reduce((sum, item) => sum + amountInBase(item, data.baseCurrency ?? 'USD'), 0);
+  const plannedSpend = plan.categoryBudgets.reduce((sum, item) => sum + item.amount, 0);
+  const actualSpend = data.transactions.filter((transaction) => transaction.type === 'expense' && monthKey(transaction.date) === month).reduce((sum, item) => sum + amountInBase(item, data.baseCurrency ?? 'USD'), 0);
+  const templates = data.budgetTemplates ?? [];
+  const activeTemplate = templates.find((template) => template.id === plan.templateId);
+  return <>
+    <section className="page-intro compact"><div><div className="kicker"><WalletCards size={14} /> Plan with intention</div><h1>Budgets</h1><p>Compare your plan with what actually happened in <strong>{getMonthLabel(month)}</strong>.</p></div><div className="plan-actions"><div className="range-steps"><button onClick={() => onShift(-1)} aria-label="Previous planning month"><ChevronLeft size={17} /></button><button onClick={() => onShift(1)} aria-label="Next planning month"><ChevronRight size={17} /></button></div><div className="budget-total"><span>Planned spending</span><strong>{formatCurrency(plannedSpend)}</strong></div></div></section>
+    <section className="panel plan-summary"><div><span>Planned income</span><strong>{formatCurrency(plan.plannedIncome)}</strong></div><div><span>Actual income</span><strong>{formatCurrency(actualIncome)}</strong></div><div><span>Planned spend</span><strong>{formatCurrency(plannedSpend)}</strong></div><div><span>Actual spend</span><strong>{formatCurrency(actualSpend)}</strong></div><div><span>Variance</span><strong className={actualSpend > plannedSpend ? 'negative-text' : 'positive-text'}>{actualSpend > plannedSpend ? '−' : '+'}{formatCurrency(Math.abs(plannedSpend - actualSpend))}</strong></div></section>
+    <section className="panel budget-controls"><div className="segmented" role="tablist" aria-label="Budget comparison mode"><button className={mode === 'compare' ? 'selected' : ''} onClick={() => setMode('compare')}>Compare</button><button className={mode === 'planned' ? 'selected' : ''} onClick={() => setMode('planned')}>Planned</button><button className={mode === 'actual' ? 'selected' : ''} onClick={() => setMode('actual')}>Actual</button></div><div className="template-actions"><select value="" onChange={(event) => { const template = templates.find((item) => item.id === event.target.value); if (template) onApplyTemplate(month, template); }}><option value="">Apply template…</option>{templates.map((template) => <option key={template.id} value={template.id}>{template.name}</option>)}</select><input value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder="New template name" /><button className="secondary-button small" disabled={!templateName.trim()} onClick={() => { onSaveTemplate({ id: `template-${makeId()}`, name: templateName.trim(), currency: data.baseCurrency ?? 'USD', plannedIncome: plan.plannedIncome, categoryBudgets: plan.categoryBudgets, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }); setTemplateName(''); }}>Save as template</button></div>{activeTemplate && <small className="muted">Using {activeTemplate.name} for this month.</small>}</section>
+    <div className="budget-layout"><div className="panel budget-panel"><div className="panel-heading"><div><div className="panel-kicker"><CircleDollarSign size={14} /> Category envelopes</div><h2>{mode === 'compare' ? 'Planned versus actual' : mode === 'planned' ? 'Monthly plan' : 'Actual spending'}</h2></div><span className="muted">{mode === 'compare' ? 'Edit planned amounts inline' : mode === 'planned' ? 'Edit inline' : 'From saved transactions'}</span></div><div className="budget-list">{expenseCategories.map((category) => { const planned = plan.categoryBudgets.find((item) => item.categoryId === category.id)?.amount ?? 0; const actual = data.transactions.filter((transaction) => transaction.type === 'expense' && transaction.categoryId === category.id && monthKey(transaction.date) === month).reduce((sum, transaction) => sum + amountInBase(transaction, data.baseCurrency ?? 'USD'), 0); const ratio = planned ? actual / planned : 0; const primary = mode === 'planned' ? planned : actual; return <div className="budget-row comparison-row" key={category.id}><div className="budget-label"><span className="legend-swatch" style={{ background: category.color }} /><strong>{category.name}</strong><small>{mode === 'compare' ? `${formatCurrency(actual)} actual · ${formatCurrency(planned)} planned` : mode === 'planned' ? 'Planned amount' : 'Recorded spending'}</small></div><div className="budget-track"><span style={{ width: `${Math.min((planned ? actual / planned : actual ? 1 : 0) * 100, 100)}%`, background: ratio > 1 ? '#e07d5b' : category.color }} /></div><div className="budget-value">{mode === 'planned' ? <><span>{currencySymbol(data.baseCurrency ?? 'USD')}</span><input aria-label={`${category.name} monthly budget`} type="number" min="0" value={planned || ''} placeholder="0" onChange={(event) => onBudgetChange(month, category.id, Number(event.target.value))} /></> : <><strong className={ratio > 1 ? 'negative-text' : 'positive-text'}>{formatCurrency(primary)}</strong></>}<small>{mode === 'compare' ? (ratio > 1 ? `${Math.round((ratio - 1) * 100)}% over` : `${formatCurrency(Math.max(planned - actual, 0))} left`) : mode === 'planned' ? 'Tap to edit' : `${formatCurrency(actual)} actual`}</small></div></div>})}</div></div><div className="panel add-category-panel"><div className="panel-kicker"><Tags size={14} /> Keep it personal</div><h2>Need another category?</h2><p>Add one that matches the way you actually spend. You can budget it right away.</p><div className="add-category-form"><input value={newCategory} onChange={(event) => setNewCategory(event.target.value)} placeholder="e.g. Travel" onKeyDown={(event) => { if (event.key === 'Enter' && newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }} /><button className="primary-button small" onClick={() => { if (newCategory.trim()) { onAddCategory(newCategory.trim(), 'expense'); setNewCategory(''); } }}><Plus size={16} /> Add</button></div><div className="tip-box"><Sparkles size={16} /><span>Templates save the plan, not the transactions. Actual spending always comes from your ledger.</span></div></div></div>
+  </>;
+}
+
+function RecurringModal({ data, rule, onClose, onSave }: { data: BudgitalData; rule: RecurringTransaction | null; onClose: () => void; onSave: (rule: RecurringTransaction) => void }) {
+  const base = data.baseCurrency ?? 'USD';
+  const [draft, setDraft] = useState<RecurringTransaction>(rule ?? { id: `recurring-${makeId()}`, type: 'expense', amount: 0, currency: base, categoryId: data.categories.find((item) => item.kind !== 'income')?.id ?? '', description: '', frequency: 'monthly', dayOfMonth: 1, startDate: isoDate(), active: true, createdAt: new Date().toISOString() });
+  const categories = data.categories.filter((category) => draft.type === 'income' ? category.kind !== 'expense' : category.kind !== 'income');
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="recurring-title"><div className="modal-heading"><div><div className="panel-kicker"><CalendarDays size={14} /> Local rule</div><h2 id="recurring-title">{rule ? 'Edit recurring transaction' : 'Add recurring transaction'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="type-toggle"><button className={draft.type === 'expense' ? 'selected expense' : ''} onClick={() => setDraft({ ...draft, type: 'expense', categoryId: data.categories.find((item) => item.kind !== 'income')?.id ?? '' })}>Expense</button><button className={draft.type === 'income' ? 'selected income' : ''} onClick={() => setDraft({ ...draft, type: 'income', categoryId: data.categories.find((item) => item.kind !== 'expense')?.id ?? '' })}>Income</button></div><div className="form-grid"><label>Amount<div className="amount-input"><span>{currencySymbol(draft.currency)}</span><input type="number" min="0" value={draft.amount || ''} onChange={(event) => setDraft({ ...draft, amount: Number(event.target.value) })} /></div></label><label>Currency<select value={draft.currency} onChange={(event) => setDraft({ ...draft, currency: event.target.value as CurrencyCode })}>{currencyOptions.map((item) => <option key={item.code}>{item.code}</option>)}</select></label><label className="full-field">Description<input value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder="e.g. Apartment rent" /></label><label>Category<select value={draft.categoryId} onChange={(event) => setDraft({ ...draft, categoryId: event.target.value })}>{categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select></label><label>Repeat<select value={draft.frequency} onChange={(event) => setDraft({ ...draft, frequency: event.target.value as RecurrenceFrequency })}><option value="monthly">Monthly</option><option value="weekly">Weekly</option><option value="yearly">Yearly</option></select></label><label>Starts<input type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} /></label>{draft.frequency === 'monthly' && <label>Day of month<input type="number" min="1" max="31" value={draft.dayOfMonth ?? 1} onChange={(event) => setDraft({ ...draft, dayOfMonth: Math.max(1, Math.min(31, Number(event.target.value))) })} /></label>}{draft.frequency === 'weekly' && <label>Day<select value={draft.dayOfWeek ?? 1} onChange={(event) => setDraft({ ...draft, dayOfWeek: Number(event.target.value) })}>{['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map((name, index) => <option key={name} value={index}>{name}</option>)}</select></label>}<label className="full-field"><span><input type="checkbox" checked={draft.active} onChange={(event) => setDraft({ ...draft, active: event.target.checked })} /> Active</span></label></div><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!draft.description.trim() || draft.amount <= 0 || !draft.startDate} onClick={() => onSave({ ...draft, description: draft.description.trim() })}><Check size={16} /> Save rule</button></div></section></div>;
 }
 
 function DataView({ data, onImport, onExport, lastExportAt, aiEnabled, onAiEnabledChange, onClear, baseCurrency, defaultCurrency, onDefaultCurrencyChange, onRefreshRates, fxMessage }: { data: BudgitalData; onImport: () => void; onExport: () => void; lastExportAt: string; aiEnabled: boolean; onAiEnabledChange: (enabled: boolean) => void; onClear: () => void; baseCurrency: CurrencyCode; defaultCurrency: CurrencyCode; onDefaultCurrencyChange: (currency: CurrencyCode) => void; onRefreshRates: () => void; fxMessage: string }) {
@@ -1075,7 +1237,7 @@ function DataView({ data, onImport, onExport, lastExportAt, aiEnabled, onAiEnabl
     <section className="page-intro compact"><div><div className="kicker"><FileUp size={14} /> Your data, your rules</div><h1>Import & export</h1><p>Everything stays local. Move a copy whenever you need one.</p></div><span className="local-badge"><span className="local-pulse" /> Local-only storage</span></section>
     <div className="data-grid">
       <div className="panel data-card primary-data"><div className="data-card-icon"><Upload size={21} /></div><div><h2>Import transactions</h2><p>Bring in a CSV from your bank or a spreadsheet. We’ll validate it, flag likely duplicates, and show a preview before anything is saved.</p></div><button className="primary-button" onClick={onImport}><FileUp size={17} /> Choose CSV</button><div className="format-note"><Check size={14} /> Basic CSV: date, type, amount, category, description · Budgital backup CSVs also preserve categories, budgets, currency, and rates</div></div>
-      <div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download your transactions, categories, and budgets as one CSV file you can keep or edit.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export{lastExportAt ? ` · Last export ${new Date(lastExportAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</div></div>
+      <div className="panel data-card"><div className="data-card-icon export"><Download size={21} /></div><div><h2>Export a backup</h2><p>Download transactions, recurring rules, categories, monthly plans, and templates as one CSV backup you can keep or restore later.</p></div><button className="secondary-button" onClick={onExport}><Download size={17} /> Export CSV</button><div className="format-note"><Check size={14} /> {data.transactions.length} transactions ready to export{lastExportAt ? ` · Last export ${new Date(lastExportAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ''}</div></div>
     </div>
     <div className="panel ai-settings-panel"><div className="data-card-icon export"><Sparkles size={21} /></div><div><h2>AI preferences</h2><p>AI is optional. Smart Reads on the dashboard remain local; enabling AI sends only aggregate totals and category totals for a Gemini second opinion.</p></div><label className="ai-toggle"><input type="checkbox" checked={aiEnabled} onChange={(event) => onAiEnabledChange(event.target.checked)} /><span>{aiEnabled ? 'AI enabled' : 'AI off · local-only mode'}</span></label><div className="format-note"><ShieldCheckIcon /> Daily limit: {AI_DAILY_LIMIT} requests · {aiEnabled ? 'AI requests are available from the floating chatbot.' : 'No Gemini requests will be made.'}</div></div>
     <div className="panel currency-panel"><div className="data-card-icon export"><CircleDollarSign size={21} /></div><div><h2>Choose your default currency</h2><p>Choose the default currency for new entries. AED, SAR, PHP, USD, EUR, GBP, LKR, INR, AUD, CAD, and JPY are supported. Gemini can refresh cautious conversion estimates.</p></div><label className="currency-setting"><span>Default for new entries</span><select value={defaultCurrency} onChange={(event) => onDefaultCurrencyChange(event.target.value as CurrencyCode)}>{currencyOptions.map((item) => <option key={item.code} value={item.code}>{item.code} · {item.label}</option>)}</select></label><button className="secondary-button" onClick={onRefreshRates}><Sparkles size={16} /> Update AI rates</button>{fxMessage && <div className="format-note"><Check size={14} /> {fxMessage}</div>}{missingFx > 0 && <div className="format-note warning-note"><ShieldCheckIcon /> {missingFx} foreign {missingFx === 1 ? 'entry needs' : 'entries need'} a verified rate and are excluded from base totals until one is available.</div>}</div>
@@ -1272,6 +1434,29 @@ function parseCsv(text: string, categories: Category[], existingTransactions: Tr
       const budget = { categoryId, amount };
       return { id: `import-budget-${index}-${makeId()}`, type: 'expense', amount, date: '', categoryId, description: `Budget · ${values.category || categoryId}`, recordType, importBudget: budget, valid: Boolean(categoryId && amount > 0), error: !categoryId ? 'Category' : amount > 0 ? undefined : 'Budget amount' };
     }
+    if (recordType === 'recurring') {
+      const categoryId = values.categoryid || knownCategories.find((category) => category.name.toLowerCase() === (values.category || '').toLowerCase())?.id || '';
+      const currency = currencyOptions.some((item) => item.code === values.currency?.toUpperCase()) ? values.currency.toUpperCase() as CurrencyCode : undefined;
+      const amount = Number(String(values.amount || '').replace(/[$,]/g, ''));
+      const frequency = values.frequency === 'weekly' || values.frequency === 'yearly' ? values.frequency : 'monthly';
+      const rule: RecurringTransaction = { id: values.id || `recurring-${index}-${makeId()}`, type: values.type?.toLowerCase() === 'income' ? 'income' : 'expense', amount, currency: currency ?? 'USD', categoryId, description: values.description || values.category || 'Recurring transaction', frequency, dayOfMonth: Number(values.dayofmonth || 1), dayOfWeek: Number(values.dayofweek || 0), monthOfYear: Number(values.monthofyear || 1), startDate: values.startdate || values.date, endDate: values.enddate || undefined, active: values.active !== 'false', createdAt: values.createdat || new Date().toISOString() };
+      const error = !categoryId ? 'Category' : !amount || amount <= 0 ? 'Amount' : !/^\d{4}-\d{2}-\d{2}$/.test(rule.startDate) ? 'Start date' : undefined;
+      return { id: rule.id, type: rule.type, amount: rule.amount, date: rule.startDate, categoryId: rule.categoryId, description: rule.description, recordType, importRecurring: rule, valid: !error, error };
+    }
+    if (recordType === 'template') {
+      let categoryBudgets: Budget[] = [];
+      try { categoryBudgets = JSON.parse(values.templatecategorybudgets || '[]') as Budget[]; } catch { categoryBudgets = []; }
+      const template: BudgetTemplate = { id: values.id || `template-${index}-${makeId()}`, name: values.templatename || values.description || 'Imported template', currency: (currencyOptions.some((item) => item.code === values.currency?.toUpperCase()) ? values.currency.toUpperCase() : 'USD') as CurrencyCode, plannedIncome: Number(values.plannedincome || 0), categoryBudgets, createdAt: values.createdat || new Date().toISOString(), updatedAt: values.updatedat || new Date().toISOString() };
+      const error = template.categoryBudgets.some((item) => !item.categoryId || item.amount < 0) ? 'Template budgets' : undefined;
+      return { id: template.id, type: 'expense', amount: template.plannedIncome, date: '', categoryId: '', description: template.name, recordType, importTemplate: template, valid: !error, error };
+    }
+    if (recordType === 'plan') {
+      let categoryBudgets: Budget[] = [];
+      try { categoryBudgets = JSON.parse(values.plancategorybudgets || '[]') as Budget[]; } catch { categoryBudgets = []; }
+      const plan: MonthlyPlan = { month: values.planmonth || (values.date || '').slice(0, 7), templateId: values.templateid || undefined, plannedIncome: Number(values.plannedincome || 0), categoryBudgets, appliedAt: values.appliedat || new Date().toISOString() };
+      const error = !/^\d{4}-\d{2}$/.test(plan.month) ? 'Plan month' : categoryBudgets.some((item) => !item.categoryId || item.amount < 0) ? 'Plan budgets' : undefined;
+      return { id: `import-plan-${plan.month}-${index}`, type: 'expense', amount: plan.plannedIncome, date: `${plan.month}-01`, categoryId: '', description: `Plan · ${plan.month}`, recordType, importPlan: plan, valid: !error, error };
+    }
     const date = values.date || '';
     const type: TransactionType = values.type?.toLowerCase() === 'income' ? 'income' : 'expense';
     const amount = Number(String(values.amount || '').replace(/[$,]/g, ''));
@@ -1293,11 +1478,15 @@ function parseCsv(text: string, categories: Category[], existingTransactions: Tr
 }
 
 function exportCsv(data: BudgitalData) {
-  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount'];
+  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount', 'frequency', 'dayOfMonth', 'dayOfWeek', 'monthOfYear', 'startDate', 'endDate', 'active', 'templateName', 'plannedIncome', 'templateCategoryBudgets', 'planMonth', 'templateId', 'appliedAt', 'createdAt', 'updatedAt'];
   const rows: (string | number)[][] = [header];
-  data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '']));
-  data.categories.forEach((category) => rows.push(['category', category.id, '', '', '', category.name, '', '', '', category.id, category.color, category.kind, '']));
-  data.budgets.forEach((budget) => rows.push(['budget', `budget-${budget.categoryId}`, '', '', '', getCategory(data.categories, budget.categoryId).name, '', '', '', budget.categoryId, '', '', budget.amount.toFixed(2)]));
+  const blank = (count: number) => Array.from({ length: count }, () => '');
+  data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '', ...blank(15)]));
+  data.categories.forEach((category) => rows.push(['category', category.id, '', '', '', category.name, '', '', '', category.id, category.color, category.kind, '', ...blank(15)]));
+  data.budgets.forEach((budget) => rows.push(['budget', `budget-${budget.categoryId}`, '', '', '', getCategory(data.categories, budget.categoryId).name, '', '', '', budget.categoryId, '', '', budget.amount.toFixed(2), ...blank(15)]));
+  (data.recurringTransactions ?? []).forEach((rule) => rows.push(['recurring', rule.id, rule.startDate, rule.type, rule.amount.toFixed(2), getCategory(data.categories, rule.categoryId).name, rule.description, rule.currency, '', rule.categoryId, '', '', '', rule.frequency, rule.dayOfMonth ?? '', rule.dayOfWeek ?? '', rule.monthOfYear ?? '', rule.startDate, rule.endDate ?? '', String(rule.active), '', '', '', '', '', '', rule.createdAt, '']));
+  (data.budgetTemplates ?? []).forEach((template) => rows.push(['template', template.id, '', '', '', '', template.name, template.currency, '', '', '', '', '', '', '', '', '', '', '', '', template.name, template.plannedIncome.toFixed(2), JSON.stringify(template.categoryBudgets), '', '', '', template.createdAt, template.updatedAt]));
+  (data.monthlyPlans ?? []).forEach((plan) => rows.push(['plan', `plan-${plan.month}`, `${plan.month}-01`, '', '', '', `Plan · ${plan.month}`, data.baseCurrency ?? 'USD', '', '', '', '', '', '', '', '', '', '', '', '', '', plan.plannedIncome.toFixed(2), JSON.stringify(plan.categoryBudgets), plan.month, plan.templateId ?? '', plan.appliedAt, '', '']));
   const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
