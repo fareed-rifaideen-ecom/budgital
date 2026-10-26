@@ -114,3 +114,7 @@
 - [ ] Document encrypted `GEMINI_API_KEY` and optional `GEMINI_MODEL` Cloudflare Pages Production settings.
 - [ ] Serve SPA routes through `public/_redirects` and static/security behavior through `public/_headers`; verify both files are copied to `dist/`.
 - [ ] Build and syntax-check the Phase 1 implementation locally; do not deploy or change DNS in this pass.
+
+## Backup provenance extension
+
+- [x] Extend full-backup CSVs with optional `source`, `recurringId`, and `occurrenceKey` transaction fields; export recurring-generated transactions with those values; restore them when present; remain compatible with older CSVs where the fields are absent.

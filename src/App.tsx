@@ -1410,7 +1410,7 @@ function parseCsvRecords(text: string): string[][] {
   return rows;
 }
 
-function parseCsv(text: string, categories: Category[], existingTransactions: Transaction[]): ImportRow[] {
+export function parseCsv(text: string, categories: Category[], existingTransactions: Transaction[]): ImportRow[] {
   const records = parseCsvRecords(text);
   if (!records.length) return [];
   const first = records[0].map((cell) => cell.trim().toLowerCase());
@@ -1466,7 +1466,8 @@ function parseCsv(text: string, categories: Category[], existingTransactions: Tr
     const fxRateToBase = Number(values.fxratetobase || values.fxrate || 0) || undefined;
     const id = values.id || `import-${index}-${makeId()}`;
     const description = values.description || categoryName;
-    const transaction: Transaction = { id, type, amount, date, categoryId: existing?.id ?? '', description, currency, fxRateToBase, fxSource: fxRateToBase ? 'CSV rate' : undefined };
+    const source = ['manual', 'recurring', 'imported', 'receipt', 'voice'].includes(values.source) ? values.source as Transaction['source'] : undefined;
+    const transaction: Transaction = { id, type, amount, date, categoryId: existing?.id ?? '', description, currency, fxRateToBase, fxSource: fxRateToBase ? 'CSV rate' : undefined, source, recurringId: values.recurringid || undefined, occurrenceKey: values.occurrencekey || undefined };
     const error = !/^\d{4}-\d{2}-\d{2}$/.test(date) ? 'Date format' : !amount || amount <= 0 ? 'Amount' : !existing ? 'Category' : undefined;
     const fingerprint = transactionFingerprint(transaction);
     const duplicateById = Boolean(values.id && existingById.has(values.id));
@@ -1477,17 +1478,21 @@ function parseCsv(text: string, categories: Category[], existingTransactions: Tr
   });
 }
 
-function exportCsv(data: BudgitalData) {
-  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount', 'frequency', 'dayOfMonth', 'dayOfWeek', 'monthOfYear', 'startDate', 'endDate', 'active', 'templateName', 'plannedIncome', 'templateCategoryBudgets', 'planMonth', 'templateId', 'appliedAt', 'createdAt', 'updatedAt'];
+export function buildBackupCsv(data: BudgitalData) {
+  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount', 'frequency', 'dayOfMonth', 'dayOfWeek', 'monthOfYear', 'startDate', 'endDate', 'active', 'templateName', 'plannedIncome', 'templateCategoryBudgets', 'planMonth', 'templateId', 'appliedAt', 'createdAt', 'updatedAt', 'source', 'recurringId', 'occurrenceKey'];
   const rows: (string | number)[][] = [header];
   const blank = (count: number) => Array.from({ length: count }, () => '');
-  data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '', ...blank(15)]));
-  data.categories.forEach((category) => rows.push(['category', category.id, '', '', '', category.name, '', '', '', category.id, category.color, category.kind, '', ...blank(15)]));
-  data.budgets.forEach((budget) => rows.push(['budget', `budget-${budget.categoryId}`, '', '', '', getCategory(data.categories, budget.categoryId).name, '', '', '', budget.categoryId, '', '', budget.amount.toFixed(2), ...blank(15)]));
-  (data.recurringTransactions ?? []).forEach((rule) => rows.push(['recurring', rule.id, rule.startDate, rule.type, rule.amount.toFixed(2), getCategory(data.categories, rule.categoryId).name, rule.description, rule.currency, '', rule.categoryId, '', '', '', rule.frequency, rule.dayOfMonth ?? '', rule.dayOfWeek ?? '', rule.monthOfYear ?? '', rule.startDate, rule.endDate ?? '', String(rule.active), '', '', '', '', '', '', rule.createdAt, '']));
-  (data.budgetTemplates ?? []).forEach((template) => rows.push(['template', template.id, '', '', '', '', template.name, template.currency, '', '', '', '', '', '', '', '', '', '', '', '', template.name, template.plannedIncome.toFixed(2), JSON.stringify(template.categoryBudgets), '', '', '', template.createdAt, template.updatedAt]));
-  (data.monthlyPlans ?? []).forEach((plan) => rows.push(['plan', `plan-${plan.month}`, `${plan.month}-01`, '', '', '', `Plan · ${plan.month}`, data.baseCurrency ?? 'USD', '', '', '', '', '', '', '', '', '', '', '', '', '', plan.plannedIncome.toFixed(2), JSON.stringify(plan.categoryBudgets), plan.month, plan.templateId ?? '', plan.appliedAt, '', '']));
-  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '', ...blank(15), transaction.source ?? '', transaction.recurringId ?? '', transaction.occurrenceKey ?? '']));
+  data.categories.forEach((category) => rows.push(['category', category.id, '', '', '', category.name, '', '', '', category.id, category.color, category.kind, '', ...blank(18)]));
+  data.budgets.forEach((budget) => rows.push(['budget', `budget-${budget.categoryId}`, '', '', '', getCategory(data.categories, budget.categoryId).name, '', '', '', budget.categoryId, '', '', budget.amount.toFixed(2), ...blank(18)]));
+  (data.recurringTransactions ?? []).forEach((rule) => rows.push(['recurring', rule.id, rule.startDate, rule.type, rule.amount.toFixed(2), getCategory(data.categories, rule.categoryId).name, rule.description, rule.currency, '', rule.categoryId, '', '', '', rule.frequency, rule.dayOfMonth ?? '', rule.dayOfWeek ?? '', rule.monthOfYear ?? '', rule.startDate, rule.endDate ?? '', String(rule.active), '', '', '', '', '', '', rule.createdAt, '', '', '', '']));
+  (data.budgetTemplates ?? []).forEach((template) => rows.push(['template', template.id, '', '', '', '', template.name, template.currency, '', '', '', '', '', '', '', '', '', '', '', '', template.name, template.plannedIncome.toFixed(2), JSON.stringify(template.categoryBudgets), '', '', '', template.createdAt, template.updatedAt, '', '', '']));
+  (data.monthlyPlans ?? []).forEach((plan) => rows.push(['plan', `plan-${plan.month}`, `${plan.month}-01`, '', '', '', `Plan · ${plan.month}`, data.baseCurrency ?? 'USD', '', '', '', '', '', '', '', '', '', '', '', '', '', plan.plannedIncome.toFixed(2), JSON.stringify(plan.categoryBudgets), plan.month, plan.templateId ?? '', plan.appliedAt, '', '', '', '', '']));
+  return rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+}
+
+function exportCsv(data: BudgitalData) {
+  const csv = buildBackupCsv(data);
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
