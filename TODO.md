@@ -118,3 +118,9 @@
 ## Backup provenance extension
 
 - [x] Extend full-backup CSVs with optional `source`, `recurringId`, and `occurrenceKey` transaction fields; export recurring-generated transactions with those values; restore them when present; remain compatible with older CSVs where the fields are absent.
+
+## Local profile customization
+
+- [x] Replace the desktop sidebar placeholder with a dynamic local profile showing the user’s display name, workspace name, and initials or selected avatar style.
+- [x] Add a responsive Profile & workspace modal with editable display name, workspace name, avatar style, accent color, preview, save, and cancel actions.
+- [x] Store the profile in the browser only, keep it independent of authentication, and include it in CSV backup export/import records.

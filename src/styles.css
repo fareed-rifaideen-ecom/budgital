@@ -1287,3 +1287,23 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .backup-actions > *, .reminder-controls > * { flex: 1 1 100%; }
   .forecast-metrics { grid-template-columns: 1fr; }
 }
+
+
+/* Local profile customization */
+.profile-button { cursor: pointer; }
+.profile-button .avatar { display: grid; place-items: center; color: #13211e; font-weight: 800; transition: transform .2s ease, box-shadow .2s ease; }
+.profile-button:hover .avatar { transform: scale(1.05); box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent); }
+.profile-modal { width: min(100% - 28px, 520px); }
+.profile-preview { display: flex; align-items: center; gap: 13px; margin: 18px 0; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-3); }
+.profile-preview .avatar { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 50%; color: #13211e; font-size: 16px; font-weight: 800; }
+.profile-preview strong, .profile-preview small { display: block; }
+.profile-preview small { margin-top: 4px; color: var(--t3); font-size: 10px; }
+.profile-options { display: grid; gap: 16px; margin-top: 16px; }
+.profile-options > div > small { display: block; margin-bottom: 8px; color: var(--t3); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+.profile-style-options, .profile-color-options { display: flex; flex-wrap: wrap; gap: 8px; }
+.profile-style-options button { border: 1px solid var(--line); border-radius: 9px; padding: 8px 11px; background: var(--surface-3); color: var(--t2); font: inherit; font-size: 10px; text-transform: capitalize; cursor: pointer; }
+.profile-style-options button.selected { border-color: var(--accent); color: var(--ink); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent); }
+.profile-color-options button { width: 28px; height: 28px; border: 2px solid transparent; border-radius: 50%; cursor: pointer; }
+.profile-color-options button.selected { border-color: var(--ink); box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
+.profile-privacy-note { margin: 16px 0 0; color: var(--t3); font-size: 10px; line-height: 1.55; }
+@media (max-width: 560px) { .profile-modal { width: calc(100% - 20px); padding: 18px 15px; } }

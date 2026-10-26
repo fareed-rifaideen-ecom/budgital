@@ -45,6 +45,7 @@ import { PwaInstallPrompt } from './PwaInstallPrompt';
 import { submitFeedback } from './feedback';
 import { buildMonthlyForecast, createEncryptedSnapshot, decryptSnapshot, type EncryptedSnapshotEnvelope } from './privacyFeatures';
 import { browserNotificationState, defaultReminderPreferences, enableBrowserReminders, loadReminderPreferences, saveReminderPreferences, sendReminderNotification, upcomingRecurringReminders, type ReminderPreferences, type UpcomingReminder } from './localReminders';
+import { DEFAULT_PROFILE, PROFILE_COLORS, normalizeProfile, profileInitials, type BudgitalProfile } from './profile';
 
 type TransactionType = 'income' | 'expense';
 type CurrencyCode = 'USD' | 'EUR' | 'GBP' | 'LKR' | 'INR' | 'AUD' | 'CAD' | 'JPY' | 'AED' | 'SAR' | 'PHP';
@@ -139,9 +140,10 @@ type BudgitalData = {
   isDemo: boolean;
   baseCurrency?: CurrencyCode;
   defaultCurrency?: CurrencyCode;
+  profile?: BudgitalProfile;
 };
 
-type ImportRow = Transaction & { valid: boolean; error?: string; warning?: string; recordType?: 'transaction' | 'category' | 'budget' | 'recurring' | 'template' | 'plan'; importCategory?: Category; importBudget?: Budget; importRecurring?: RecurringTransaction; importTemplate?: BudgetTemplate; importPlan?: MonthlyPlan };
+type ImportRow = Transaction & { valid: boolean; error?: string; warning?: string; recordType?: 'transaction' | 'category' | 'budget' | 'recurring' | 'template' | 'plan' | 'profile'; importCategory?: Category; importBudget?: Budget; importRecurring?: RecurringTransaction; importTemplate?: BudgetTemplate; importPlan?: MonthlyPlan; importProfile?: BudgitalProfile };
 
 const STORAGE_KEY = 'budgetly-data-v1';
 const SETTINGS_KEY = 'budgetly-settings-v1';
@@ -269,6 +271,7 @@ function demoData(): BudgitalData {
     monthlyPlans: [{ month, plannedIncome: 6000, categoryBudgets: [{ categoryId: 'rent', amount: 1600 }, { categoryId: 'food', amount: 600 }, { categoryId: 'dining', amount: 320 }, { categoryId: 'transport', amount: 250 }, { categoryId: 'subscriptions', amount: 120 }, { categoryId: 'health', amount: 180 }], appliedAt: new Date().toISOString(), templateId: 'starter-template' }],
     baseCurrency: 'USD',
     defaultCurrency: 'USD',
+    profile: DEFAULT_PROFILE,
   };
 }
 
@@ -278,7 +281,7 @@ function migrateData(parsed: BudgitalData): BudgitalData {
   const baseCurrency = parsed.baseCurrency ?? parsed.defaultCurrency ?? 'USD';
   const templates = Array.isArray(parsed.budgetTemplates) ? parsed.budgetTemplates : [{ id: `template-${makeId()}`, name: 'My baseline', currency: baseCurrency, plannedIncome: 0, categoryBudgets: budgets, createdAt: now, updatedAt: now }];
   const monthlyPlans = Array.isArray(parsed.monthlyPlans) && parsed.monthlyPlans.length ? parsed.monthlyPlans : [{ month: currentMonth, plannedIncome: 0, categoryBudgets: budgets, appliedAt: now, templateId: templates[0]?.id }];
-  return { ...parsed, schemaVersion: DATA_SCHEMA_VERSION, budgets, recurringTransactions: Array.isArray(parsed.recurringTransactions) ? parsed.recurringTransactions : [], budgetTemplates: templates, monthlyPlans, baseCurrency, defaultCurrency: parsed.defaultCurrency ?? baseCurrency };
+  return { ...parsed, schemaVersion: DATA_SCHEMA_VERSION, budgets, recurringTransactions: Array.isArray(parsed.recurringTransactions) ? parsed.recurringTransactions : [], budgetTemplates: templates, monthlyPlans, baseCurrency, defaultCurrency: parsed.defaultCurrency ?? baseCurrency, profile: normalizeProfile(parsed.profile) };
 }
 
 function planForMonth(data: BudgitalData, month: string): MonthlyPlan {
@@ -585,6 +588,7 @@ export function App() {
   const [showTutorial, setShowTutorial] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
   const [showLegal, setShowLegal] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
   const [termsAccepted, setTermsAccepted] = useState(() => localStorage.getItem(TERMS_KEY) === 'accepted');
   const [feedbackStatus, setFeedbackStatus] = useState<'idle' | 'sent' | 'local'>('idle');
   const [feedback, setFeedback] = useState({ kind: 'Feedback', email: '', message: '' });
@@ -783,12 +787,13 @@ export function App() {
     const templatesById = new Map((data.budgetTemplates ?? []).map((template) => [template.id, template]));
     importedTemplates.forEach((template) => templatesById.set(template.id, template));
     const importedPlans = valid.flatMap((row) => row.importPlan ? [row.importPlan] : []);
+    const importedProfile = valid.find((row) => row.importProfile)?.importProfile;
     const plansByMonth = new Map((data.monthlyPlans ?? []).map((plan) => [plan.month, plan]));
     importedPlans.forEach((plan) => plansByMonth.set(plan.month, plan));
-    const importedTransactions = valid.filter((row) => row.recordType === 'transaction' || !row.recordType).map(({ valid: _valid, error: _error, recordType: _recordType, importCategory: _category, importBudget: _budget, importRecurring: _recurring, importTemplate: _template, importPlan: _plan, ...row }) => row);
+    const importedTransactions = valid.filter((row) => row.recordType === 'transaction' || !row.recordType).map(({ valid: _valid, error: _error, recordType: _recordType, importCategory: _category, importBudget: _budget, importRecurring: _recurring, importTemplate: _template, importPlan: _plan, importProfile: _profile, ...row }) => row);
     const transactionsById = new Map(data.transactions.map((transaction) => [transaction.id, transaction]));
     importedTransactions.forEach((transaction) => transactionsById.set(transaction.id, transaction));
-    mutate({ ...data, categories: Array.from(categoriesById.values()), budgets: Array.from(budgetsByCategory.values()), transactions: Array.from(transactionsById.values()), recurringTransactions: Array.from(recurringById.values()), budgetTemplates: Array.from(templatesById.values()), monthlyPlans: Array.from(plansByMonth.values()) });
+    mutate({ ...data, categories: Array.from(categoriesById.values()), budgets: Array.from(budgetsByCategory.values()), transactions: Array.from(transactionsById.values()), recurringTransactions: Array.from(recurringById.values()), budgetTemplates: Array.from(templatesById.values()), monthlyPlans: Array.from(plansByMonth.values()), profile: importedProfile ?? data.profile ?? DEFAULT_PROFILE });
     setShowImport(false);
   }
 
@@ -971,7 +976,7 @@ export function App() {
     setShowClearData(true);
   }
   function performClearData() {
-    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD', defaultCurrency: data.defaultCurrency ?? data.baseCurrency ?? 'USD' });
+    mutate({ categories: defaultCategories, transactions: [], budgets: [], isDemo: false, baseCurrency: data.baseCurrency ?? 'USD', defaultCurrency: data.defaultCurrency ?? data.baseCurrency ?? 'USD', profile: data.profile ?? DEFAULT_PROFILE });
     setShowClearData(false);
   }
 
@@ -1021,7 +1026,7 @@ export function App() {
         </nav>
         <div className="sidebar-bottom">
           <div className="local-note"><span className="local-pulse" /><div><strong>Saved locally</strong><span>Your data stays in this browser.</span></div></div><button className="sidebar-guide" onClick={() => setShowTutorial(true)}><BookOpen size={14} /> How Budgital works</button><button className="sidebar-guide" onClick={() => setShowFeedback(true)}><MessageSquare size={14} /> Inquiry / feedback</button><button className="sidebar-guide" onClick={() => setShowLegal(true)}><FileText size={14} /> Terms & disclaimer</button><a className="sidebar-author" href="https://buymeacoffee.com/fareedmrifaideen" target="_blank" rel="noreferrer"><Coffee size={14} /> Lumina Metrics by FMR · Support</a>
-          <button className="profile-button"><span className="avatar">JD</span><span className="profile-copy"><strong>Jordan Doe</strong><small>Personal account</small></span><MoreHorizontal size={17} /></button>
+          <button className="profile-button" onClick={() => setShowProfile(true)} aria-label="Customize local profile"><span className={`avatar avatar-${data.profile?.avatarStyle ?? 'initials'}`} style={{ background: data.profile?.avatarStyle === 'minimal' ? 'var(--surface-3)' : data.profile?.avatarColor ?? DEFAULT_PROFILE.avatarColor }}>{data.profile?.avatarStyle === 'minimal' ? <Settings2 size={16} /> : profileInitials(data.profile?.displayName ?? DEFAULT_PROFILE.displayName)}</span><span className="profile-copy"><strong>{data.profile?.displayName ?? DEFAULT_PROFILE.displayName}</strong><small>{data.profile?.workspaceName ?? DEFAULT_PROFILE.workspaceName}</small></span><MoreHorizontal size={17} /></button>
         </div>
       </aside>
 
@@ -1065,6 +1070,7 @@ export function App() {
       {showTutorial && <TutorialModal onClose={() => setShowTutorial(false)} />}
       {showFeedback && <AppFeedbackModal feedback={feedback} setFeedback={setFeedback} status={feedbackStatus} onSent={() => setFeedbackStatus('sent')} onLocal={() => setFeedbackStatus('local')} onClose={() => { setShowFeedback(false); setFeedbackStatus('idle'); }} />}
       {showLegal && <AppLegalModal onClose={() => setShowLegal(false)} />}
+      {showProfile && <ProfileModal profile={data.profile ?? DEFAULT_PROFILE} onClose={() => setShowProfile(false)} onSave={(profile) => { mutate({ ...data, profile }); setShowProfile(false); }} />}
       {showAi && <AiConversation enabled={aiEnabled} loading={aiLoading} insight={aiInsight} messages={aiMessages} asking={aiAsking} error={aiError} errorCode={aiErrorCode} range={range} currency={data.baseCurrency ?? 'USD'} categoryNames={categorySpend.map(({ category }) => category.name)} transactionCount={rangeTransactions.length} onClose={() => setShowAi(false)} onRetry={runAiInsights} onRetryFollowUp={retryAiFollowUp} onAsk={askAiFollowUp} failedQuestion={aiFailedQuestion} aiRemaining={Math.max(AI_DAILY_LIMIT - aiUsage, 0)} />}
     </div>
   );
@@ -1492,6 +1498,10 @@ export function parseCsv(text: string, categories: Category[], existingTransacti
       const error = !/^\d{4}-\d{2}$/.test(plan.month) ? 'Plan month' : categoryBudgets.some((item) => !item.categoryId || item.amount < 0) ? 'Plan budgets' : undefined;
       return { id: `import-plan-${plan.month}-${index}`, type: 'expense', amount: plan.plannedIncome, date: `${plan.month}-01`, categoryId: '', description: `Plan · ${plan.month}`, recordType, importPlan: plan, valid: !error, error };
     }
+    if (recordType === 'profile') {
+      const profile = normalizeProfile({ displayName: values.profiledisplayname || values.description, workspaceName: values.profileworkspacename || values.currency, avatarStyle: values.profileavatarstyle as BudgitalProfile['avatarStyle'], avatarColor: values.profileavatarcolor });
+      return { id: 'import-profile', type: 'expense', amount: 0, date: '', categoryId: '', description: profile.displayName, recordType, importProfile: profile, valid: true };
+    }
     const date = values.date || '';
     const type: TransactionType = values.type?.toLowerCase() === 'income' ? 'income' : 'expense';
     const amount = Number(String(values.amount || '').replace(/[$,]/g, ''));
@@ -1514,7 +1524,7 @@ export function parseCsv(text: string, categories: Category[], existingTransacti
 }
 
 export function buildBackupCsv(data: BudgitalData) {
-  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount', 'frequency', 'dayOfMonth', 'dayOfWeek', 'monthOfYear', 'startDate', 'endDate', 'active', 'templateName', 'plannedIncome', 'templateCategoryBudgets', 'planMonth', 'templateId', 'appliedAt', 'createdAt', 'updatedAt', 'source', 'recurringId', 'occurrenceKey'];
+  const header = ['recordType', 'id', 'date', 'type', 'amount', 'category', 'description', 'currency', 'fxRateToBase', 'categoryId', 'categoryColor', 'categoryKind', 'budgetAmount', 'frequency', 'dayOfMonth', 'dayOfWeek', 'monthOfYear', 'startDate', 'endDate', 'active', 'templateName', 'plannedIncome', 'templateCategoryBudgets', 'planMonth', 'templateId', 'appliedAt', 'createdAt', 'updatedAt', 'source', 'recurringId', 'occurrenceKey', 'profileDisplayName', 'profileWorkspaceName', 'profileAvatarStyle', 'profileAvatarColor'];
   const rows: (string | number)[][] = [header];
   const blank = (count: number) => Array.from({ length: count }, () => '');
   data.transactions.forEach((transaction) => rows.push(['transaction', transaction.id, transaction.date, transaction.type, transaction.amount.toFixed(2), getCategory(data.categories, transaction.categoryId).name, transaction.description, transaction.currency ?? data.baseCurrency ?? 'USD', transaction.fxRateToBase ? String(transaction.fxRateToBase) : '', transaction.categoryId, '', '', '', ...blank(15), transaction.source ?? '', transaction.recurringId ?? '', transaction.occurrenceKey ?? '']));
@@ -1523,7 +1533,9 @@ export function buildBackupCsv(data: BudgitalData) {
   (data.recurringTransactions ?? []).forEach((rule) => rows.push(['recurring', rule.id, rule.startDate, rule.type, rule.amount.toFixed(2), getCategory(data.categories, rule.categoryId).name, rule.description, rule.currency, '', rule.categoryId, '', '', '', rule.frequency, rule.dayOfMonth ?? '', rule.dayOfWeek ?? '', rule.monthOfYear ?? '', rule.startDate, rule.endDate ?? '', String(rule.active), '', '', '', '', '', '', rule.createdAt, '', '', '', '']));
   (data.budgetTemplates ?? []).forEach((template) => rows.push(['template', template.id, '', '', '', '', template.name, template.currency, '', '', '', '', '', '', '', '', '', '', '', '', template.name, template.plannedIncome.toFixed(2), JSON.stringify(template.categoryBudgets), '', '', '', template.createdAt, template.updatedAt, '', '', '']));
   (data.monthlyPlans ?? []).forEach((plan) => rows.push(['plan', `plan-${plan.month}`, `${plan.month}-01`, '', '', '', `Plan · ${plan.month}`, data.baseCurrency ?? 'USD', '', '', '', '', '', '', '', '', '', '', '', '', '', plan.plannedIncome.toFixed(2), JSON.stringify(plan.categoryBudgets), plan.month, plan.templateId ?? '', plan.appliedAt, '', '', '', '', '']));
-  return rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const profile = normalizeProfile(data.profile);
+  rows.push(['profile', 'profile', ...blank(header.length - 6), profile.displayName, profile.workspaceName, profile.avatarStyle, profile.avatarColor]);
+  return rows.map((row) => { const normalized = [...row, ...blank(Math.max(0, header.length - row.length))]; return normalized.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','); }).join('\n');
 }
 
 function exportCsv(data: BudgitalData) {
@@ -1541,6 +1553,12 @@ function EmptyState({ title, copy }: { title: string; copy: string }) {
   return <div className="empty-state"><span><Receipt size={17} /></span><strong>{title}</strong><p>{copy}</p></div>;
 }
 
+
+function ProfileModal({ profile, onClose, onSave }: { profile: BudgitalProfile; onClose: () => void; onSave: (profile: BudgitalProfile) => void }) {
+  const [draft, setDraft] = useState(profile);
+  const initials = profileInitials(draft.displayName);
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal profile-modal" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div className="modal-heading"><div><div className="panel-kicker"><Settings2 size={14} /> Local workspace</div><h2 id="profile-title">Customize your profile</h2></div><button className="icon-button" onClick={onClose} aria-label="Close"><X size={19} /></button></div><div className="profile-preview"><span className={`avatar avatar-${draft.avatarStyle}`} style={{ background: draft.avatarStyle === 'minimal' ? 'var(--surface-3)' : draft.avatarColor }}>{draft.avatarStyle === 'minimal' ? <Settings2 size={19} /> : initials}</span><div><strong>{draft.displayName || 'Your name'}</strong><small>{draft.workspaceName || 'Personal workspace'}</small></div></div><div className="form-grid"><label className="full-field">Display name<input maxLength={60} value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} placeholder="e.g. Fareed Rifaideen" /></label><label className="full-field">Workspace name<input maxLength={60} value={draft.workspaceName} onChange={(event) => setDraft({ ...draft, workspaceName: event.target.value })} placeholder="e.g. Personal workspace" /></label></div><div className="profile-options"><div><small>Avatar style</small><div className="profile-style-options">{(['initials', 'gradient', 'minimal'] as const).map((style) => <button type="button" key={style} className={draft.avatarStyle === style ? 'selected' : ''} onClick={() => setDraft({ ...draft, avatarStyle: style })}>{style}</button>)}</div></div><div><small>Accent color</small><div className="profile-color-options">{PROFILE_COLORS.map((color) => <button type="button" key={color} aria-label={`Use ${color} avatar color`} className={draft.avatarColor === color ? 'selected' : ''} style={{ background: color }} onClick={() => setDraft({ ...draft, avatarColor: color })} />)}</div></div></div><p className="profile-privacy-note">This profile is stored in this browser and included in your backups. It is not an online account.</p><div className="modal-actions"><button className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" onClick={() => onSave(normalizeProfile({ ...draft, updatedAt: new Date().toISOString() }))}><Check size={16} /> Save profile</button></div></section></div>;
+}
 
 function ThemeSwitch({ theme, onChange }: { theme: Theme; onChange: (next: Theme, origin?: { x: number; y: number }) => void }) {
   const next: Theme = theme === 'dark' ? 'light' : 'dark';

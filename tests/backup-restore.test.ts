@@ -44,6 +44,13 @@ const baseData = {
   ],
   budgetTemplates: [],
   monthlyPlans: [],
+  profile: {
+    displayName: 'Fareed Rifaideen',
+    workspaceName: 'Personal workspace',
+    avatarStyle: 'initials',
+    avatarColor: '#8cc4ff',
+    updatedAt: '2026-10-26T00:00:00.000Z',
+  },
 };
 
 describe('Budgital backup and restore', () => {
@@ -68,6 +75,24 @@ describe('Budgital backup and restore', () => {
       recordType: 'recurring',
       importRecurring: expect.objectContaining({ id: 'rule-dining', categoryId: 'dining' }),
       valid: true,
+    });
+  });
+
+  it('exports and restores a local profile record', () => {
+    const csv = buildBackupCsv(baseData as any);
+    const imported = parseCsv(csv, [...categories], []);
+    const profile = imported.find((row) => row.recordType === 'profile');
+
+    expect(csv).toContain('profileDisplayName');
+    expect(profile).toMatchObject({
+      recordType: 'profile',
+      valid: true,
+      importProfile: {
+        displayName: 'Fareed Rifaideen',
+        workspaceName: 'Personal workspace',
+        avatarStyle: 'initials',
+        avatarColor: '#8cc4ff',
+      },
     });
   });
 
