@@ -1259,3 +1259,31 @@ html[data-theme='dark'] .data-card.primary-data .format-note { color: var(--acce
   .recurring-row { grid-template-columns: minmax(0, 1fr) auto; }
   .recurring-row .row-actions { grid-column: 1 / -1; justify-content: flex-end; }
 }
+
+/* Privacy backup, local forecast, and browser reminders */
+.encrypted-backup-panel, .reminders-panel, .forecast-panel { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 15px; align-items: start; margin-top: 15px; padding: 18px 21px; }
+.encrypted-backup-panel h2, .reminders-panel h2, .forecast-panel h2 { margin: 0; font-size: 15px; }
+.encrypted-backup-panel p, .reminders-panel p { margin-top: 5px; color: var(--t3); font-size: 10px; line-height: 1.55; }
+.encrypted-backup-panel .format-note, .reminders-panel .upcoming-list { grid-column: 2; }
+.backup-actions, .reminder-controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; grid-column: 2; }
+.backup-actions label { cursor: pointer; }
+.reminder-controls label { display: inline-flex; align-items: center; gap: 7px; color: var(--t3); font-size: 10px; }
+.reminder-controls select { min-height: 32px; border: 1px solid var(--line); border-radius: 8px; padding: 0 8px; background: var(--surface-3); color: var(--ink); font: inherit; font-size: 10px; }
+.upcoming-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.upcoming-list span { padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-3); color: var(--t2); font-size: 9px; }
+.forecast-panel { grid-template-columns: 1fr; }
+.forecast-panel .panel-heading { margin: 0; }
+.forecast-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 10px; }
+.forecast-metrics > div { display: grid; gap: 5px; padding: 12px; background: var(--surface-3); }
+.forecast-metrics span { color: var(--t3); font-size: 9px; text-transform: uppercase; letter-spacing: .07em; }
+.forecast-metrics strong { font-size: 13px; }
+.forecast-risks { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; }
+.forecast-risks span { padding: 7px 9px; border-radius: 8px; background: var(--surface-3); }
+.warning-text { color: var(--warn-text); }
+@media (max-width: 640px) {
+  .encrypted-backup-panel, .reminders-panel { grid-template-columns: auto minmax(0, 1fr); padding: 15px; }
+  .encrypted-backup-panel .format-note, .reminders-panel .upcoming-list { grid-column: 1 / -1; }
+  .backup-actions, .reminder-controls { grid-column: 1 / -1; }
+  .backup-actions > *, .reminder-controls > * { flex: 1 1 100%; }
+  .forecast-metrics { grid-template-columns: 1fr; }
+}
